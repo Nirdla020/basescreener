@@ -1,14 +1,20 @@
 import { Suspense } from "react";
 import DashboardClient from "./DashboardClient";
 
-export const dynamic = "force-dynamic";
-
-export default function DashboardPage() {
+export default function dashboardPage() {
   return (
-    <Suspense
-      fallback={<div className="min-h-screen bg-[#020617] text-white p-6">Loading…</div>}
-    >
+    <Suspense fallback={<Loading />}>
       <DashboardClient />
     </Suspense>
+  );
+}
+
+function Loading() {
+  return (
+    <main className="min-h-screen bg-[#020617] text-white flex items-center justify-center">
+      <div className="animate-pulse text-blue-400 font-bold text-xl">
+        Loading dashboard...
+      </div>
+    </main>
   );
 }

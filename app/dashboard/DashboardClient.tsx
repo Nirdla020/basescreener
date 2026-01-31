@@ -45,7 +45,7 @@ function fmtPriceUsd(s?: string) {
 
 function normalizeTs(ts?: number) {
   if (!ts || !Number.isFinite(ts)) return undefined;
-  return ts < 1_000_000_000_000 ? ts * 1000 : ts; // seconds → ms
+  return ts < 1_000_000_000_000 ? ts * 1000 : ts;
 }
 
 function fmtAge(ts?: number) {
@@ -114,12 +114,22 @@ export default function Dashboard() {
   }, [sp]);
 
   async function loadFromSearch() {
-    const queries = ["base", "base usdc", "base weth", "base coin", "base meme", "base ai", "base degen"];
+    const queries = [
+      "base",
+      "base usdc",
+      "base weth",
+      "base coin",
+      "base meme",
+      "base ai",
+      "base degen",
+    ];
 
     const results = await Promise.all(
       queries.map(async (q) => {
         const res = await fetch(
-          `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`,
+          `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(
+            q
+          )}`,
           { cache: "no-store" }
         );
         if (!res.ok) return [];
@@ -128,7 +138,9 @@ export default function Dashboard() {
       })
     );
 
-    const pairs = results.flat().filter((p) => (p.chainId || "").toLowerCase() === "base");
+    const pairs = results
+      .flat()
+      .filter((p) => (p.chainId || "").toLowerCase() === "base");
 
     const map = new Map<string, DexPair>();
     for (const p of pairs) {
@@ -151,8 +163,10 @@ export default function Dashboard() {
       if (tab === "trending") return trendingScore(b) - trendingScore(a);
 
       if (tab === "new") {
-        const atx = (a.txns?.h24?.buys ?? 0) + (a.txns?.h24?.sells ?? 0);
-        const btx = (b.txns?.h24?.buys ?? 0) + (b.txns?.h24?.sells ?? 0);
+        const atx =
+          (a.txns?.h24?.buys ?? 0) + (a.txns?.h24?.sells ?? 0);
+        const btx =
+          (b.txns?.h24?.buys ?? 0) + (b.txns?.h24?.sells ?? 0);
         if (al !== bl) return al - bl;
         return btx - atx;
       }
@@ -166,7 +180,10 @@ export default function Dashboard() {
 
   async function loadFromTokensEndpoint(addrs: string[]) {
     const joined = addrs.join(",");
-    const res = await fetch(`https://api.dexscreener.com/tokens/v1/base/${joined}`, { cache: "no-store" });
+    const res = await fetch(
+      `https://api.dexscreener.com/tokens/v1/base/${joined}`,
+      { cache: "no-store" }
+    );
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     const data = (await res.json()) as DexPair[];
     setRows(data || []);
@@ -255,192 +272,221 @@ export default function Dashboard() {
   }
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white p-4 sm:p-8">
-      {/* TOP CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-2xl bg-blue-600 p-6 shadow-lg">
-          <div className="text-xs font-bold text-blue-100">24H VOL</div>
-          <div className="mt-1 text-3xl font-extrabold">{fmtUsd(totals.vol)}</div>
-        </div>
-
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-lg">
-          <div className="text-xs font-bold text-blue-200">24H TXNS</div>
-          <div className="mt-1 text-3xl font-extrabold">{Math.round(totals.txns).toLocaleString()}</div>
-        </div>
-
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-lg flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-blue-200">ALERTS</div>
-            <div className="mt-1 text-3xl font-extrabold">0 Active</div>
-          </div>
-          <div className="text-2xl opacity-80">🔔</div>
-        </div>
-      </div>
-
-      {/* CONTROL BAR */}
-      <div className="mt-6 rounded-2xl bg-white/5 border border-white/10 p-4">
-        <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center">
-          {/* Token input */}
-          <div className="flex flex-1 gap-2">
-            <input
-              value={tokenAddr}
-              onChange={(e) => setTokenAddr(e.target.value)}
-              placeholder="ENTER TOKEN ADDRESS..."
-              className="flex-1 px-4 py-3 rounded-xl bg-black/40 border border-blue-500/30 outline-none focus:border-blue-400"
-            />
-            <button onClick={onGo} className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition">
-              GO
-            </button>
-            <button
-              onClick={() => {
-                setTokenAddr("");
-                setQuery("");
-                loadData();
-              }}
-              className="px-4 py-3 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition"
-              title="Reset"
-            >
-              ↻
-            </button>
+    // ✅ FIX: pt-24 pushes content under your fixed navbar
+    <main className="min-h-screen bg-[#020617] text-white pt-24">
+      {/* ✅ FIX: centered container + padding */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* TOP CARDS */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-2xl bg-blue-600 p-6 shadow-lg">
+            <div className="text-xs font-bold text-blue-100">24H VOL</div>
+            <div className="mt-1 text-3xl font-extrabold">
+              {fmtUsd(totals.vol)}
+            </div>
           </div>
 
-          {/* Timeframes (UI only for now) */}
-          <div className="flex gap-2 items-center justify-start">
-            {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-lg">
+            <div className="text-xs font-bold text-blue-200">24H TXNS</div>
+            <div className="mt-1 text-3xl font-extrabold">
+              {Math.round(totals.txns).toLocaleString()}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-lg flex items-center justify-between">
+            <div>
+              <div className="text-xs font-bold text-blue-200">ALERTS</div>
+              <div className="mt-1 text-3xl font-extrabold">0 Active</div>
+            </div>
+            <div className="text-2xl opacity-80">🔔</div>
+          </div>
+        </div>
+
+        {/* CONTROL BAR */}
+        <div className="mt-6 rounded-2xl bg-white/5 border border-white/10 p-4">
+          <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center">
+            {/* Token input */}
+            <div className="flex flex-1 gap-2">
+              <input
+                value={tokenAddr}
+                onChange={(e) => setTokenAddr(e.target.value)}
+                placeholder="ENTER TOKEN ADDRESS..."
+                className="flex-1 px-4 py-3 rounded-xl bg-black/40 border border-blue-500/30 outline-none focus:border-blue-400"
+              />
               <button
-                key={k}
-                onClick={() => setTf(k)}
-                className={`px-4 py-3 rounded-xl border border-white/10 ${
-                  tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-blue-100"
-                }`}
+                onClick={onGo}
+                className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition"
               >
-                {k.toUpperCase()}
+                GO
               </button>
-            ))}
-          </div>
-
-          {/* Tabs */}
-          <div className="flex gap-2 items-center justify-start">
-            {(
-              [
-                ["trending", "🔥 TRENDING"],
-                ["new", "✨ NEW"],
-                ["top", "📈 TOP"],
-                ["saved", "🔖 SAVED"],
-              ] as Array<[Tab, string]>
-            ).map(([k, label]) => (
               <button
-                key={k}
-                onClick={() => setTab(k)}
-                className={`px-4 py-3 rounded-xl border border-white/10 ${
-                  tab === k ? "bg-blue-600 font-bold" : "bg-white/5 text-blue-100"
-                }`}
+                onClick={() => {
+                  setTokenAddr("");
+                  setQuery("");
+                  loadData();
+                }}
+                className="px-4 py-3 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition"
+                title="Reset"
               >
-                {label}
+                ↻
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* second row */}
-        <div className="mt-4 flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="text-sm text-blue-100">
-              AUTO: <span className="font-bold">{auto ? `${autoSec}s` : "OFF"}</span>
             </div>
 
-            <button
-              onClick={() => setAuto(!auto)}
-              className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
-            >
-              Toggle Auto
-            </button>
+            {/* Timeframes (UI only for now) */}
+            <div className="flex gap-2 items-center justify-start">
+              {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
+                <button
+                  key={k}
+                  onClick={() => setTf(k)}
+                  className={`px-4 py-3 rounded-xl border border-white/10 ${
+                    tf === k
+                      ? "bg-white text-[#020617] font-bold"
+                      : "bg-white/5 text-blue-100"
+                  }`}
+                >
+                  {k.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-2 items-center justify-start">
+              {(
+                [
+                  ["trending", "🔥 TRENDING"],
+                  ["new", "✨ NEW"],
+                  ["top", "📈 TOP"],
+                  ["saved", "🔖 SAVED"],
+                ] as Array<[Tab, string]>
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setTab(k)}
+                  className={`px-4 py-3 rounded-xl border border-white/10 ${
+                    tab === k
+                      ? "bg-blue-600 font-bold"
+                      : "bg-white/5 text-blue-100"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* second row */}
+          <div className="mt-4 flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-blue-100">
+                AUTO:{" "}
+                <span className="font-bold">
+                  {auto ? `${autoSec}s` : "OFF"}
+                </span>
+              </div>
+
+              <button
+                onClick={() => setAuto(!auto)}
+                className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
+              >
+                Toggle Auto
+              </button>
+
+              <input
+                type="number"
+                value={autoSec}
+                onChange={(e) =>
+                  setAutoSec(Math.max(5, Number(e.target.value) || 12))
+                }
+                className="w-24 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+                min={5}
+              />
+            </div>
 
             <input
-              type="number"
-              value={autoSec}
-              onChange={(e) => setAutoSec(Math.max(5, Number(e.target.value) || 12))}
-              className="w-24 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
-              min={5}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter by symbol/name/address..."
+              className="w-full md:w-96 px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
             />
           </div>
-
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by symbol/name/address..."
-            className="w-full md:w-96 px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
-          />
         </div>
-      </div>
 
-      {/* TABLE */}
-      <div className="mt-6 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
-        <div className="min-w-[1120px]">
-          <div className="grid grid-cols-11 gap-0 px-4 py-3 text-xs font-bold text-blue-200 border-b border-white/10">
-            <div>#</div>
-            <div className="col-span-2">ASSET</div>
-            <div className="col-span-2">ADDRESS</div>
-            <div>AGE</div>
-            <div>PRICE</div>
-            <div>24H TXNS</div>
-            <div>VOL</div>
-            <div>LIQ</div>
-            <div>MCAP/FDV</div>
-          </div>
+        {/* TABLE */}
+        <div className="mt-6 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
+          <div className="min-w-[1120px]">
+            <div className="grid grid-cols-11 gap-0 px-4 py-3 text-xs font-bold text-blue-200 border-b border-white/10">
+              <div>#</div>
+              <div className="col-span-2">ASSET</div>
+              <div className="col-span-2">ADDRESS</div>
+              <div>AGE</div>
+              <div>PRICE</div>
+              <div>24H TXNS</div>
+              <div>VOL</div>
+              <div>LIQ</div>
+              <div>MCAP/FDV</div>
+            </div>
 
-          {loading && <div className="px-4 py-6 text-blue-100">Loading…</div>}
-          {err && <div className="px-4 py-6 text-red-300">{err}</div>}
+            {loading && (
+              <div className="px-4 py-6 text-blue-100">Loading…</div>
+            )}
+            {err && <div className="px-4 py-6 text-red-300">{err}</div>}
 
-          {!loading &&
-            !err &&
-            bestRows.map((r, i) => {
-              const buys = r.txns?.h24?.buys ?? 0;
-              const sells = r.txns?.h24?.sells ?? 0;
-              const txns = buys + sells;
+            {!loading &&
+              !err &&
+              bestRows.map((r, i) => {
+                const buys = r.txns?.h24?.buys ?? 0;
+                const sells = r.txns?.h24?.sells ?? 0;
+                const txns = buys + sells;
 
-              return (
-                <a
-                  key={r.baseToken.address}
-                  href={r.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grid grid-cols-11 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition"
-                >
-                  <div className="text-blue-100">{i + 1}</div>
+                return (
+                  <a
+                    key={r.baseToken.address}
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="grid grid-cols-11 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition"
+                  >
+                    <div className="text-blue-100">{i + 1}</div>
 
-                  <div className="col-span-2 flex items-center gap-3 min-w-0">
-                    <img
-                      src={r.info?.imageUrl || "/token-placeholder.png"}
-                      alt=""
-                      className="h-9 w-9 rounded-xl bg-white/10 object-cover"
-                      loading="lazy"
-                    />
-                    <div className="min-w-0">
-                      <div className="font-bold">{r.baseToken.symbol}</div>
-                      <div className="text-xs text-blue-200 truncate">{r.baseToken.name}</div>
+                    <div className="col-span-2 flex items-center gap-3 min-w-0">
+                      <img
+                        src={r.info?.imageUrl || "/token-placeholder.png"}
+                        alt=""
+                        className="h-9 w-9 rounded-xl bg-white/10 object-cover"
+                        loading="lazy"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-bold">{r.baseToken.symbol}</div>
+                        <div className="text-xs text-blue-200 truncate">
+                          {r.baseToken.name}
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="col-span-2 text-blue-100 font-mono text-xs break-all">
-                    {r.baseToken.address}
-                  </div>
+                    <div className="col-span-2 text-blue-100 font-mono text-xs break-all">
+                      {r.baseToken.address}
+                    </div>
 
-                  <div className="text-blue-100 font-bold">{fmtAge(r.pairCreatedAt)}</div>
+                    <div className="text-blue-100 font-bold">
+                      {fmtAge(r.pairCreatedAt)}
+                    </div>
 
-                  <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
+                    <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
 
-                  <div className="text-blue-100">
-                    <span className="font-bold">{txns.toLocaleString()}</span>
-                    <span className="text-xs text-blue-200"> ({buys}/{sells})</span>
-                  </div>
+                    <div className="text-blue-100">
+                      <span className="font-bold">{txns.toLocaleString()}</span>
+                      <span className="text-xs text-blue-200">
+                        {" "}
+                        ({buys}/{sells})
+                      </span>
+                    </div>
 
-                  <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
-                  <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
-                  <div className="text-blue-100">{fmtUsd(r.fdv)}</div>
-                </a>
-              );
-            })}
+                    <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
+                    <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
+                    <div className="text-blue-100">{fmtUsd(r.fdv)}</div>
+                  </a>
+                );
+              })}
+          </div>
         </div>
       </div>
     </main>
