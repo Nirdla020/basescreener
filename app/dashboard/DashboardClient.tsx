@@ -18,7 +18,6 @@ type DexPair = {
   txns?: { h24?: { buys?: number; sells?: number } };
   fdv?: number;
 
-  // ✅ added
   pairCreatedAt?: number;
   info?: { imageUrl?: string };
 };
@@ -44,13 +43,11 @@ function fmtPriceUsd(s?: string) {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 8 })}`;
 }
 
-// ✅ added
 function normalizeTs(ts?: number) {
   if (!ts || !Number.isFinite(ts)) return undefined;
   return ts < 1_000_000_000_000 ? ts * 1000 : ts; // seconds → ms
 }
 
-// ✅ added
 function fmtAge(ts?: number) {
   const ms = normalizeTs(ts);
   if (!ms) return "—";
@@ -78,7 +75,6 @@ function readSaved(): string[] {
   }
 }
 
-// "DexScreener-like" trending score using public metrics only
 function trendingScore(p: DexPair) {
   const vol = p.volume?.h24 ?? 0;
   const liq = p.liquidity?.usd ?? 0;
@@ -86,15 +82,12 @@ function trendingScore(p: DexPair) {
   const sells = p.txns?.h24?.sells ?? 0;
   const txns = buys + sells;
 
-  // log smoothing
   const lv = Math.log10(vol + 1);
   const ll = Math.log10(liq + 1);
   const lt = Math.log10(txns + 1);
 
-  // penalty for extremely low liquidity (spam protection)
   const lowLiqPenalty = liq < 2000 ? 1.5 : liq < 10000 ? 0.7 : 0;
 
-  // weights tuned for a "trending" feel
   return lv * 2.2 + lt * 1.6 + ll * 1.0 - lowLiqPenalty;
 }
 
@@ -102,26 +95,24 @@ export default function Dashboard() {
   const sp = useSearchParams();
 
   const [tab, setTab] = useState<Tab>("trending");
-  const [tf, setTf] = useState<TF>("24h"); // UI only (placeholder)
+  const [tf, setTf] = useState<TF>("24h");
 
   const [auto, setAuto] = useState(true);
   const [autoSec, setAutoSec] = useState(12);
 
-  const [query, setQuery] = useState(""); // filter rows by symbol/name/address
-  const [tokenAddr, setTokenAddr] = useState(""); // direct token address search
+  const [query, setQuery] = useState("");
+  const [tokenAddr, setTokenAddr] = useState("");
 
   const [rows, setRows] = useState<DexPair[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // ✅ read ?q= from URL (navbar search)
   useEffect(() => {
     const qp = sp.get("q") || "";
     if (qp) setQuery(qp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
-  // ---- Multi-query DexScreener Search (bigger pool) ----
   async function loadFromSearch() {
     const queries = ["base", "base usdc", "base weth", "base coin", "base meme", "base ai", "base degen"];
 
@@ -139,7 +130,6 @@ export default function Dashboard() {
 
     const pairs = results.flat().filter((p) => (p.chainId || "").toLowerCase() === "base");
 
-    // dedupe by pairAddress (keep best liquidity version)
     const map = new Map<string, DexPair>();
     for (const p of pairs) {
       const key = (p.pairAddress || "").toLowerCase();
@@ -161,14 +151,12 @@ export default function Dashboard() {
       if (tab === "trending") return trendingScore(b) - trendingScore(a);
 
       if (tab === "new") {
-        // surface "new-ish": low liquidity first, then higher txns
         const atx = (a.txns?.h24?.buys ?? 0) + (a.txns?.h24?.sells ?? 0);
         const btx = (b.txns?.h24?.buys ?? 0) + (b.txns?.h24?.sells ?? 0);
         if (al !== bl) return al - bl;
         return btx - atx;
       }
 
-      // top: volume first, then liquidity
       if (bv !== av) return bv - av;
       return bl - al;
     });
@@ -176,7 +164,6 @@ export default function Dashboard() {
     setRows(sorted.slice(0, 100));
   }
 
-  // ---- Tokens endpoint (Saved or direct address) ----
   async function loadFromTokensEndpoint(addrs: string[]) {
     const joined = addrs.join(",");
     const res = await fetch(`https://api.dexscreener.com/tokens/v1/base/${joined}`, { cache: "no-store" });
@@ -192,14 +179,12 @@ export default function Dashboard() {
     try {
       const addr = tokenAddr.trim();
 
-      // direct token address
       if (addr) {
         if (!isAddress(addr)) throw new Error("Invalid address (0x...)");
         await loadFromTokensEndpoint([addr.toLowerCase()]);
         return;
       }
 
-      // saved tab
       if (tab === "saved") {
         const saved = readSaved().slice(0, 30).map((x) => x.toLowerCase());
         if (saved.length === 0) {
@@ -243,7 +228,6 @@ export default function Dashboard() {
     });
   }, [rows, query]);
 
-  // best pool per token (remove duplicates by base token)
   const bestRows = useMemo(() => {
     const map = new Map<string, DexPair>();
     for (const r of filtered) {
@@ -393,7 +377,6 @@ export default function Dashboard() {
       {/* TABLE */}
       <div className="mt-6 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
         <div className="min-w-[1120px]">
-          {/* ✅ header updated: grid-cols-11 + AGE */}
           <div className="grid grid-cols-11 gap-0 px-4 py-3 text-xs font-bold text-blue-200 border-b border-white/10">
             <div>#</div>
             <div className="col-span-2">ASSET</div>
@@ -426,7 +409,6 @@ export default function Dashboard() {
                 >
                   <div className="text-blue-100">{i + 1}</div>
 
-                  {/* ✅ asset cell updated: logo + name */}
                   <div className="col-span-2 flex items-center gap-3 min-w-0">
                     <img
                       src={r.info?.imageUrl || "/token-placeholder.png"}
@@ -444,7 +426,6 @@ export default function Dashboard() {
                     {r.baseToken.address}
                   </div>
 
-                  {/* ✅ AGE */}
                   <div className="text-blue-100 font-bold">{fmtAge(r.pairCreatedAt)}</div>
 
                   <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
