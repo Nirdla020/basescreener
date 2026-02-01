@@ -3,6 +3,8 @@ import "./globals.css";
 import { Suspense } from "react";
 import Navbar from "./components/Navbar";
 import FooterSupport from "./components/FooterSupport";
+import SupportCTA from "./components/SupportCTA";
+import TopBar from "./components/TopBar";
 
 export const metadata: Metadata = {
   title: "BaseScreener",
@@ -29,13 +31,22 @@ export default function RootLayout({
       </head>
 
       <body>
+        {/* ✅ Premium top strip */}
+        <TopBar />
+
         <Suspense fallback={<div className="h-14" />}>
           <Navbar />
         </Suspense>
 
-        {children}
+        {/* ✅ Consistent background + spacing */}
+        <main className="min-h-screen bg-[#020617] text-white">
+          {children}
 
-        {/* ✅ Donations Footer */}
+          {/* ✅ Monetization CTA */}
+          <SupportCTA />
+        </main>
+
+        {/* ✅ Donations footer */}
         <FooterSupport />
       </body>
     </html>

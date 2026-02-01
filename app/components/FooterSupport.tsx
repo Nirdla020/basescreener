@@ -5,7 +5,6 @@ import { useState } from "react";
 export default function FooterSupport() {
   const [copied, setCopied] = useState(false);
 
-  // Your wallet address
   const WALLET = "0xd3a961b02949fd944acdf2c890b33cdd7e84454b";
 
   async function copy() {
@@ -16,12 +15,11 @@ export default function FooterSupport() {
 
   return (
     <footer
-      id="support" // ✅ Anchor for navbar button
+      id="support"
       className="border-t border-white/10 bg-[#020617] text-white"
     >
       <div className="mx-auto max-w-6xl px-4 py-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
           {/* Left */}
           <div>
             <h3 className="text-lg font-semibold">❤️ Support BaseScreener</h3>
@@ -30,7 +28,7 @@ export default function FooterSupport() {
               fund new features.
             </p>
 
-            {/* ✅ X Link */}
+            {/* X Link */}
             <div className="mt-3 text-sm text-white/70">
               Follow us on{" "}
               <a
@@ -42,6 +40,18 @@ export default function FooterSupport() {
                 𝕏 @basescreenfun
               </a>
             </div>
+
+            {/* Share on X */}
+            <a
+              href={`https://x.com/intent/tweet?text=${encodeURIComponent(
+                "Track Base tokens in real-time 🚀 https://basescreener.fun"
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs hover:bg-white/15"
+            >
+              𝕏 Share BaseScreener
+            </a>
           </div>
 
           {/* Right */}
@@ -63,7 +73,6 @@ export default function FooterSupport() {
               </button>
             </div>
           </div>
-
         </div>
 
         <div className="mt-8 text-xs text-white/50">
