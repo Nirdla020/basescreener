@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+function isAddress(a: string) {
+  return /^0x[a-fA-F0-9]{40}$/.test(a.trim());
+}
 
 export default function Navbar() {
   const router = useRouter();
@@ -16,16 +20,24 @@ export default function Navbar() {
     setQ(sp.get("q") || "");
   }, [sp]);
 
+  const active = useMemo(() => {
+    if (pathname?.startsWith("/dashboard")) return "dashboard";
+    if (pathname?.startsWith("/token")) return "token";
+    return "home";
+  }, [pathname]);
+
   function onSearch() {
     const query = q.trim();
     if (!query) return;
 
-    // If you're on /token, send search to token page; otherwise send to dashboard
-    if (pathname?.startsWith("/token")) {
+    // ✅ If 0x address -> Token page
+    if (isAddress(query)) {
       router.push(`/token?q=${encodeURIComponent(query)}`);
-    } else {
-      router.push(`/dashboard?q=${encodeURIComponent(query)}`);
+      return;
     }
+
+    // ✅ Otherwise -> Dashboard filter
+    router.push(`/dashboard?q=${encodeURIComponent(query)}`);
   }
 
   return (
@@ -55,7 +67,10 @@ export default function Navbar() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") onSearch();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onSearch();
+                }
               }}
               placeholder="Search token (symbol/name) or paste 0x address..."
               className="
@@ -84,7 +99,7 @@ export default function Navbar() {
           <Link
             href="/dashboard"
             className={`px-4 py-2 rounded-xl border border-white/10 transition ${
-              pathname === "/dashboard"
+              active === "dashboard"
                 ? "bg-white text-[#020617] font-bold"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
             }`}
@@ -95,7 +110,7 @@ export default function Navbar() {
           <Link
             href="/token"
             className={`px-4 py-2 rounded-xl border border-white/10 transition ${
-              pathname === "/token"
+              active === "token"
                 ? "bg-white text-[#020617] font-bold"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
             }`}

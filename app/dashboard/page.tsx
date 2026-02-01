@@ -1,20 +1,16 @@
 import { Suspense } from "react";
 import DashboardClient from "./DashboardClient";
 
-export default function dashboardPage() {
+export default function DashboardPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#020617] text-white flex items-center justify-center">
+          <div className="text-blue-200">Loading dashboard...</div>
+        </main>
+      }
+    >
       <DashboardClient />
     </Suspense>
-  );
-}
-
-function Loading() {
-  return (
-    <main className="min-h-screen bg-[#020617] text-white flex items-center justify-center">
-      <div className="animate-pulse text-blue-400 font-bold text-xl">
-        Loading dashboard...
-      </div>
-    </main>
   );
 }
