@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Highlights from "../components/Highlights"; // ✅ NEW
+import Highlights from "../components/Highlights";
 
 type DexPair = {
   chainId: string;
@@ -19,12 +19,16 @@ type DexPair = {
   txns?: { h24?: { buys?: number; sells?: number } };
   fdv?: number;
 
+  // ✅ If dex returns it, we can show % columns like DexCheck
+  priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
+
   pairCreatedAt?: number;
   info?: { imageUrl?: string };
 };
 
 type Tab = "trending" | "new" | "top" | "saved";
 type TF = "5m" | "1h" | "6h" | "24h";
+type RankBy = "trending" | "volume" | "txns" | "liquidity" | "gainers";
 
 function isAddress(a: string) {
   return /^0x[a-fA-F0-9]{40}$/.test(a.trim());
@@ -32,6 +36,7 @@ function isAddress(a: string) {
 
 function fmtUsd(n?: number) {
   if (n === undefined || n === null) return "—";
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `$${Math.round(n).toLocaleString()}`;
   return `$${n.toFixed(2)}`;
@@ -88,8 +93,17 @@ function trendingScore(p: DexPair) {
   const lt = Math.log10(txns + 1);
 
   const lowLiqPenalty = liq < 2000 ? 1.5 : liq < 10000 ? 0.7 : 0;
-
   return lv * 2.2 + lt * 1.6 + ll * 1.0 - lowLiqPenalty;
+}
+
+function pctCell(v?: number) {
+  if (typeof v !== "number") return <div className="text-white/35">—</div>;
+  return (
+    <div className={v >= 0 ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
+      {v >= 0 ? "+" : ""}
+      {v.toFixed(2)}%
+    </div>
+  );
 }
 
 export default function DashboardClient() {
@@ -97,6 +111,8 @@ export default function DashboardClient() {
 
   const [tab, setTab] = useState<Tab>("trending");
   const [tf, setTf] = useState<TF>("24h");
+
+  const [rankBy, setRankBy] = useState<RankBy>("trending");
 
   const [auto, setAuto] = useState(true);
   const [autoSec, setAutoSec] = useState(12);
@@ -107,6 +123,13 @@ export default function DashboardClient() {
   const [rows, setRows] = useState<DexPair[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  // Filters panel
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [minLiq, setMinLiq] = useState<number>(0);
+  const [minVol, setMinVol] = useState<number>(0);
+  const [minTxns, setMinTxns] = useState<number>(0);
+  const [onlyWithIcon, setOnlyWithIcon] = useState(false);
 
   useEffect(() => {
     const qp = sp.get("q") || "";
@@ -130,6 +153,7 @@ export default function DashboardClient() {
 
     const pairs = results.flat().filter((p) => (p.chainId || "").toLowerCase() === "base");
 
+    // Dedup pairAddress: keep best liq
     const map = new Map<string, DexPair>();
     for (const p of pairs) {
       const key = (p.pairAddress || "").toLowerCase();
@@ -140,33 +164,14 @@ export default function DashboardClient() {
       if (!cur || liq > curLiq) map.set(key, p);
     }
 
-    const basePairs = Array.from(map.values());
-
-    const sorted = [...basePairs].sort((a, b) => {
-      const av = a.volume?.h24 ?? 0;
-      const bv = b.volume?.h24 ?? 0;
-      const al = a.liquidity?.usd ?? 0;
-      const bl = b.liquidity?.usd ?? 0;
-
-      if (tab === "trending") return trendingScore(b) - trendingScore(a);
-
-      if (tab === "new") {
-        const atx = (a.txns?.h24?.buys ?? 0) + (a.txns?.h24?.sells ?? 0);
-        const btx = (b.txns?.h24?.buys ?? 0) + (b.txns?.h24?.sells ?? 0);
-        if (al !== bl) return al - bl;
-        return btx - atx;
-      }
-
-      if (bv !== av) return bv - av;
-      return bl - al;
-    });
-
-    setRows(sorted.slice(0, 120));
+    setRows(Array.from(map.values()).slice(0, 200));
   }
 
   async function loadFromTokensEndpoint(addrs: string[]) {
     const joined = addrs.join(",");
-    const res = await fetch(`https://api.dexscreener.com/tokens/v1/base/${joined}`, { cache: "no-store" });
+    const res = await fetch(`https://api.dexscreener.com/tokens/v1/base/${joined}`, {
+      cache: "no-store",
+    });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     const data = (await res.json()) as DexPair[];
     setRows(data || []);
@@ -217,6 +222,7 @@ export default function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, autoSec, tab, tokenAddr]);
 
+  // Text filter
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
@@ -228,6 +234,7 @@ export default function DashboardClient() {
     });
   }, [rows, query]);
 
+  // Best pair per token (highest liq)
   const bestRows = useMemo(() => {
     const map = new Map<string, DexPair>();
     for (const r of filtered) {
@@ -240,63 +247,110 @@ export default function DashboardClient() {
     return Array.from(map.values());
   }, [filtered]);
 
+  // Apply numeric filters
+  const filteredByPanel = useMemo(() => {
+    return bestRows.filter((r) => {
+      const liq = r.liquidity?.usd ?? 0;
+      const vol = r.volume?.h24 ?? 0;
+      const txns = (r.txns?.h24?.buys ?? 0) + (r.txns?.h24?.sells ?? 0);
+
+      if (minLiq > 0 && liq < minLiq) return false;
+      if (minVol > 0 && vol < minVol) return false;
+      if (minTxns > 0 && txns < minTxns) return false;
+      if (onlyWithIcon && !r.info?.imageUrl) return false;
+
+      return true;
+    });
+  }, [bestRows, minLiq, minVol, minTxns, onlyWithIcon]);
+
+  // Rank/sort
+  const rankedRows = useMemo(() => {
+    const arr = [...filteredByPanel];
+
+    const txns24 = (p: DexPair) => (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
+    const gain24 = (p: DexPair) => p.priceChange?.h24 ?? 0;
+
+    arr.sort((a, b) => {
+      if (rankBy === "trending") return trendingScore(b) - trendingScore(a);
+      if (rankBy === "volume") return (b.volume?.h24 ?? 0) - (a.volume?.h24 ?? 0);
+      if (rankBy === "txns") return txns24(b) - txns24(a);
+      if (rankBy === "liquidity") return (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0);
+      if (rankBy === "gainers") return gain24(b) - gain24(a);
+      return 0;
+    });
+
+    return arr.slice(0, 120);
+  }, [filteredByPanel, rankBy]);
+
   const totals = useMemo(() => {
     let vol = 0;
     let txns = 0;
-    for (const r of bestRows) {
+    for (const r of rankedRows) {
       vol += r.volume?.h24 ?? 0;
       txns += (r.txns?.h24?.buys ?? 0) + (r.txns?.h24?.sells ?? 0);
     }
     return { vol, txns };
-  }, [bestRows]);
+  }, [rankedRows]);
+
+  // Helpers
+  function onGo() {
+    loadData();
+  }
 
   return (
     <main className="min-h-screen bg-[#020617] text-white p-4 sm:p-8">
-      {/* TOP CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-2xl bg-blue-600 p-6 shadow-lg">
-          <div className="text-xs font-bold text-blue-100">24H VOL</div>
-          <div className="mt-1 text-3xl font-extrabold">{fmtUsd(totals.vol)}</div>
+      {/* TOP STATS (DexCheck-like) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">24H VOLUME</div>
+          <div className="mt-1 text-2xl font-extrabold">{fmtUsd(totals.vol)}</div>
         </div>
 
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-lg">
-          <div className="text-xs font-bold text-blue-200">24H TXNS</div>
-          <div className="mt-1 text-3xl font-extrabold">{Math.round(totals.txns).toLocaleString()}</div>
-        </div>
-
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-lg flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-blue-200">ALERTS</div>
-            <div className="mt-1 text-3xl font-extrabold">0 Active</div>
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">24H TXNS</div>
+          <div className="mt-1 text-2xl font-extrabold">
+            {Math.round(totals.txns).toLocaleString()}
           </div>
-          <div className="text-2xl opacity-80">🔔</div>
+        </div>
+
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">LATEST BLOCK</div>
+          <div className="mt-1 text-2xl font-extrabold">—</div>
+          <div className="text-xs text-white/40 mt-0.5">Not connected</div>
         </div>
       </div>
 
-      {/* ✅ NEW: HIGHLIGHTS (Top Gainers + Trending) */}
-      <Highlights
-        tokens={bestRows.map((r) => ({
-          symbol: r.baseToken?.symbol,
-          name: r.baseToken?.name,
-          address: r.baseToken?.address,
-          icon: r.info?.imageUrl, // ✅ icon per token
-          change: (r.txns?.h24?.buys ?? 0) - (r.txns?.h24?.sells ?? 0), // placeholder "gainers"
-          volume: r.volume?.h24 ?? 0,
-        }))}
-      />
+      {/* ✅ HIGHLIGHTS (hide when searching a specific token) */}
+      {tokenAddr.trim() === "" && rankedRows.length >= 5 && (
+        <Highlights
+          tokens={rankedRows.map((r) => ({
+            symbol: r.baseToken?.symbol,
+            name: r.baseToken?.name,
+            address: r.baseToken?.address,
+            icon: r.info?.imageUrl,
+            // "gainers" placeholder if no % change data is returned
+            change:
+              typeof r.priceChange?.h24 === "number"
+                ? r.priceChange.h24
+                : (r.txns?.h24?.buys ?? 0) - (r.txns?.h24?.sells ?? 0),
+            volume: r.volume?.h24 ?? 0,
+          }))}
+        />
+      )}
 
-      {/* CONTROL BAR */}
-      <div className="mt-2 rounded-2xl bg-white/5 border border-white/10 p-4">
-        <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center">
+      {/* TOOLBAR (DexCheck-like) */}
+      <div className="mt-4 rounded-2xl bg-white/5 border border-white/10 p-4">
+        <div className="flex flex-col xl:flex-row gap-3 xl:items-center">
+          {/* Address Search */}
           <div className="flex flex-1 gap-2">
             <input
               value={tokenAddr}
               onChange={(e) => setTokenAddr(e.target.value)}
-              placeholder="ENTER TOKEN ADDRESS..."
-              className="flex-1 px-4 py-3 rounded-xl bg-black/40 border border-blue-500/30 outline-none focus:border-blue-400"
+              placeholder="Paste token address (0x...)"
+              className="flex-1 px-4 py-3 rounded-xl bg-black/40 border border-white/10 outline-none focus:border-blue-400"
             />
             <button
-              onClick={loadData}
+              onClick={onGo}
               className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition"
             >
               GO
@@ -314,13 +368,14 @@ export default function DashboardClient() {
             </button>
           </div>
 
-          <div className="flex gap-2 items-center justify-start">
+          {/* TF Buttons */}
+          <div className="flex gap-2 flex-wrap items-center">
             {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
               <button
                 key={k}
                 onClick={() => setTf(k)}
-                className={`px-4 py-3 rounded-xl border border-white/10 ${
-                  tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-blue-100"
+                className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
+                  tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
                 }`}
               >
                 {k.toUpperCase()}
@@ -328,7 +383,8 @@ export default function DashboardClient() {
             ))}
           </div>
 
-          <div className="flex gap-2 items-center justify-start">
+          {/* Tabs */}
+          <div className="flex gap-2 flex-wrap items-center">
             {(
               [
                 ["trending", "🔥 TRENDING"],
@@ -340,8 +396,8 @@ export default function DashboardClient() {
               <button
                 key={k}
                 onClick={() => setTab(k)}
-                className={`px-4 py-3 rounded-xl border border-white/10 ${
-                  tab === k ? "bg-blue-600 font-bold" : "bg-white/5 text-blue-100"
+                className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
+                  tab === k ? "bg-blue-600 font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
                 }`}
               >
                 {label}
@@ -350,10 +406,11 @@ export default function DashboardClient() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="text-sm text-blue-100">
-              AUTO: <span className="font-bold">{auto ? `${autoSec}s` : "OFF"}</span>
+        {/* Secondary row: Auto + Rank + Filter input + Filters button */}
+        <div className="mt-3 flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="text-sm text-white/70">
+              AUTO: <span className="font-bold text-white">{auto ? `${autoSec}s` : "OFF"}</span>
             </div>
 
             <button
@@ -367,44 +424,67 @@ export default function DashboardClient() {
               type="number"
               value={autoSec}
               onChange={(e) => setAutoSec(Math.max(5, Number(e.target.value) || 12))}
-              className="w-24 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+              className="w-24 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
               min={5}
             />
+
+            <select
+              value={rankBy}
+              onChange={(e) => setRankBy(e.target.value as RankBy)}
+              className="px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
+            >
+              <option value="trending">Rank by: Trending</option>
+              <option value="gainers">Rank by: Gainers (24h %)</option>
+              <option value="volume">Rank by: Volume</option>
+              <option value="txns">Rank by: Txns</option>
+              <option value="liquidity">Rank by: Liquidity</option>
+            </select>
+
+            <button
+              onClick={() => setFiltersOpen(true)}
+              className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
+            >
+              ☰ Filters
+            </button>
           </div>
 
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter by symbol/name/address..."
-            className="w-full md:w-96 px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+            className="w-full lg:w-[420px] px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
           />
         </div>
       </div>
 
-      {/* TABLE */}
-      <div className="mt-6 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
-        <div className="min-w-[1120px]">
-          <div className="grid grid-cols-11 gap-0 px-4 py-3 text-xs font-bold text-blue-200 border-b border-white/10">
+      {/* TABLE (DexCheck-ish) */}
+      <div className="mt-4 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
+        <div className="min-w-[1280px]">
+          <div className="grid grid-cols-14 gap-0 px-4 py-3 text-xs font-bold text-white/70 border-b border-white/10">
             <div>#</div>
-            <div className="col-span-2">ASSET</div>
-            <div className="col-span-2">ADDRESS</div>
-            <div>AGE</div>
+            <div className="col-span-3">TOKEN</div>
             <div>PRICE</div>
-            <div>24H TXNS</div>
-            <div>VOL</div>
+            <div>AGE</div>
+            <div>TXNS</div>
+            <div>VOLUME</div>
             <div>LIQ</div>
+            <div>5M</div>
+            <div>1H</div>
+            <div>6H</div>
+            <div>24H</div>
             <div>MCAP/FDV</div>
           </div>
 
-          {loading && <div className="px-4 py-6 text-blue-100">Loading…</div>}
+          {loading && <div className="px-4 py-6 text-white/70">Loading…</div>}
           {err && <div className="px-4 py-6 text-red-300">{err}</div>}
 
           {!loading &&
             !err &&
-            bestRows.map((r, i) => {
+            rankedRows.map((r, i) => {
               const buys = r.txns?.h24?.buys ?? 0;
               const sells = r.txns?.h24?.sells ?? 0;
               const txns = buys + sells;
+              const pc = r.priceChange || {};
 
               return (
                 <a
@@ -412,45 +492,149 @@ export default function DashboardClient() {
                   href={r.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="grid grid-cols-11 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition"
+                  className="grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
                 >
-                  <div className="text-blue-100">{i + 1}</div>
+                  <div className="text-white/80 font-bold">{i + 1}</div>
 
-                  <div className="col-span-2 flex items-center gap-3 min-w-0">
-                    {/* icon in table */}
-                    <img
-                      src={r.info?.imageUrl || "/token-placeholder.png"}
-                      alt=""
-                      className="h-9 w-9 rounded-xl bg-white/10 object-cover"
-                      loading="lazy"
-                    />
+                  <div className="col-span-3 flex items-center gap-3 min-w-0">
+                    {/* icon with fallback */}
+                    <div className="h-9 w-9 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
+                      {r.info?.imageUrl ? (
+                        <img
+                          src={r.info.imageUrl}
+                          alt=""
+                          className="h-9 w-9 object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="font-extrabold text-white">
+                          {(r.baseToken?.symbol || "?").slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+
                     <div className="min-w-0">
-                      <div className="font-bold">{r.baseToken.symbol}</div>
-                      <div className="text-xs text-blue-200 truncate">{r.baseToken.name}</div>
+                      <div className="font-bold truncate">{r.baseToken.symbol}</div>
+                      <div className="text-xs text-white/50 truncate">{r.baseToken.name}</div>
                     </div>
                   </div>
 
-                  <div className="col-span-2 text-blue-100 font-mono text-xs break-all">
-                    {r.baseToken.address}
-                  </div>
-
-                  <div className="text-blue-100 font-bold">{fmtAge(r.pairCreatedAt)}</div>
-
                   <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
+                  <div className="text-white/80 font-bold">{fmtAge(r.pairCreatedAt)}</div>
 
-                  <div className="text-blue-100">
+                  <div className="text-white/80">
                     <span className="font-bold">{txns.toLocaleString()}</span>
-                    <span className="text-xs text-blue-200"> ({buys}/{sells})</span>
+                    <span className="text-xs text-white/40"> ({buys}/{sells})</span>
                   </div>
 
                   <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
                   <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
-                  <div className="text-blue-100">{fmtUsd(r.fdv)}</div>
+
+                  {/* % columns */}
+                  {pctCell(pc.m5)}
+                  {pctCell(pc.h1)}
+                  {pctCell(pc.h6)}
+                  {pctCell(pc.h24)}
+
+                  <div className="text-white/80">{fmtUsd(r.fdv)}</div>
                 </a>
               );
             })}
         </div>
       </div>
+
+      {/* FILTERS PANEL (slide over) */}
+      {filtersOpen && (
+        <div className="fixed inset-0 z-[999]">
+          <button
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setFiltersOpen(false)}
+            aria-label="Close filters"
+          />
+
+          <div className="absolute right-0 top-0 h-full w-full max-w-md bg-[#0b1220] border-l border-white/10 p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-extrabold">Filters</div>
+              <button
+                onClick={() => setFiltersOpen(false)}
+                className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <div className="text-xs text-white/60 mb-1">Min Liquidity (USD)</div>
+                <input
+                  type="number"
+                  value={minLiq}
+                  onChange={(e) => setMinLiq(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <div className="text-xs text-white/60 mb-1">Min 24h Volume (USD)</div>
+                <input
+                  type="number"
+                  value={minVol}
+                  onChange={(e) => setMinVol(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <div className="text-xs text-white/60 mb-1">Min 24h Txns</div>
+                <input
+                  type="number"
+                  value={minTxns}
+                  onChange={(e) => setMinTxns(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+                  placeholder="0"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={onlyWithIcon}
+                  onChange={(e) => setOnlyWithIcon(e.target.checked)}
+                />
+                Only tokens with icon
+              </label>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => {
+                    setMinLiq(0);
+                    setMinVol(0);
+                    setMinTxns(0);
+                    setOnlyWithIcon(false);
+                  }}
+                  className="flex-1 rounded-xl bg-white/10 border border-white/10 px-4 py-2 text-sm hover:bg-white/15"
+                >
+                  Reset
+                </button>
+
+                <button
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500"
+                >
+                  Apply
+                </button>
+              </div>
+
+              <div className="text-xs text-white/40 pt-2">
+                Note: % columns (5m/1h/6h/24h) show only if DexScreener returns{" "}
+                <span className="text-white/60">priceChange</span>. Otherwise you’ll see “—”.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
