@@ -129,6 +129,20 @@ export default function Navbar() {
             Token
           </Link>
 
+          {/* ✅ Follow on X */}
+          <a
+            href="https://x.com/basescreenfun"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="
+              px-4 py-2 rounded-xl border border-white/10 transition
+              bg-white/5 text-white/80 hover:bg-white/10
+            "
+            title="Follow @basescreenfun on X"
+          >
+            𝕏 Follow
+          </a>
+
           {/* ✅ Support Button */}
           <button
             onClick={goSupport}

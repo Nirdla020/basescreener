@@ -29,6 +29,19 @@ export default function FooterSupport() {
               BaseScreener is free to use. Your support helps cover servers and
               fund new features.
             </p>
+
+            {/* ✅ X Link */}
+            <div className="mt-3 text-sm text-white/70">
+              Follow us on{" "}
+              <a
+                href="https://x.com/basescreenfun"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:underline"
+              >
+                𝕏 @basescreenfun
+              </a>
+            </div>
           </div>
 
           {/* Right */}
