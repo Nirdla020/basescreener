@@ -117,6 +117,18 @@ export default function Navbar() {
           >
             Token
           </Link>
+
+          {/* ✅ Support Button */}
+          <a
+            href="#support"
+            className="
+              ml-1 px-4 py-2 rounded-xl
+              bg-pink-600 text-white font-bold
+              hover:bg-pink-500 transition
+            "
+          >
+            ❤️ Support
+          </a>
         </nav>
       </div>
     </header>
