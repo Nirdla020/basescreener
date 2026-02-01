@@ -40,6 +40,17 @@ export default function Navbar() {
     router.push(`/dashboard?q=${encodeURIComponent(query)}`);
   }
 
+  // ✅ Scroll to Support section
+  function goSupport() {
+    const el = document.getElementById("support");
+    if (!el) return;
+
+    el.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/85 backdrop-blur">
       <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
@@ -119,8 +130,8 @@ export default function Navbar() {
           </Link>
 
           {/* ✅ Support Button */}
-          <a
-            href="#support"
+          <button
+            onClick={goSupport}
             className="
               ml-1 px-4 py-2 rounded-xl
               bg-pink-600 text-white font-bold
@@ -128,7 +139,7 @@ export default function Navbar() {
             "
           >
             ❤️ Support
-          </a>
+          </button>
         </nav>
       </div>
     </header>
