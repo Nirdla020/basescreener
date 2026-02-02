@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Highlights from "../components/Highlights";
+import AdUnit from "../components/AdUnit";
 
 type DexPair = {
   chainId: string;
@@ -19,7 +20,6 @@ type DexPair = {
   txns?: { h24?: { buys?: number; sells?: number } };
   fdv?: number;
 
-  // ✅ If dex returns it, we can show % columns like DexCheck
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
 
   pairCreatedAt?: number;
@@ -108,10 +108,10 @@ function pctCell(v?: number) {
 
 export default function DashboardClient() {
   const sp = useSearchParams();
+  const router = useRouter();
 
   const [tab, setTab] = useState<Tab>("trending");
-  const [tf, setTf] = useState<TF>("24h");
-
+  const [tf, setTf] = useState<TF>("24h"); // kept for future
   const [rankBy, setRankBy] = useState<RankBy>("trending");
 
   const [auto, setAuto] = useState(true);
@@ -292,15 +292,26 @@ export default function DashboardClient() {
     return { vol, txns };
   }, [rankedRows]);
 
-  // Helpers
   function onGo() {
     loadData();
   }
 
+  // ✅ Ads disabled until you add REAL AdSense slot IDs
+  // When you have real IDs, put them here, e.g. "1234567890"
+  const AD_SLOT_TOP = "";
+  const AD_SLOT_BOTTOM = "";
+
   return (
-    <main className="min-h-screen bg-[#020617] text-white p-4 sm:p-8">
-      {/* TOP STATS (DexCheck-like) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <main className="min-h-screen text-white p-4 sm:p-8">
+      {/* ✅ Top Ad (only renders if slot exists) */}
+      <div className="mx-auto max-w-6xl">
+        {AD_SLOT_TOP && (
+          <AdUnit slot={AD_SLOT_TOP} className="glass ring-soft rounded-2xl p-3 mb-4" />
+        )}
+      </div>
+
+      {/* TOP STATS */}
+      <div className="mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">24H VOLUME</div>
           <div className="mt-1 text-2xl font-extrabold">{fmtUsd(totals.vol)}</div>
@@ -320,26 +331,27 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* ✅ HIGHLIGHTS (hide when searching a specific token) */}
+      {/* ✅ HIGHLIGHTS */}
       {tokenAddr.trim() === "" && rankedRows.length >= 5 && (
-        <Highlights
-          tokens={rankedRows.map((r) => ({
-            symbol: r.baseToken?.symbol,
-            name: r.baseToken?.name,
-            address: r.baseToken?.address,
-            icon: r.info?.imageUrl,
-            // "gainers" placeholder if no % change data is returned
-            change:
-              typeof r.priceChange?.h24 === "number"
-                ? r.priceChange.h24
-                : (r.txns?.h24?.buys ?? 0) - (r.txns?.h24?.sells ?? 0),
-            volume: r.volume?.h24 ?? 0,
-          }))}
-        />
+        <div className="mx-auto max-w-6xl mt-4">
+          <Highlights
+            tokens={rankedRows.map((r) => ({
+              symbol: r.baseToken?.symbol,
+              name: r.baseToken?.name,
+              address: r.baseToken?.address,
+              icon: r.info?.imageUrl,
+              change:
+                typeof r.priceChange?.h24 === "number"
+                  ? r.priceChange.h24
+                  : (r.txns?.h24?.buys ?? 0) - (r.txns?.h24?.sells ?? 0),
+              volume: r.volume?.h24 ?? 0,
+            }))}
+          />
+        </div>
       )}
 
-      {/* TOOLBAR (DexCheck-like) */}
-      <div className="mt-4 rounded-2xl bg-white/5 border border-white/10 p-4">
+      {/* TOOLBAR */}
+      <div className="mx-auto max-w-6xl mt-4 rounded-2xl bg-white/5 border border-white/10 p-4">
         <div className="flex flex-col xl:flex-row gap-3 xl:items-center">
           {/* Address Search */}
           <div className="flex flex-1 gap-2">
@@ -368,14 +380,16 @@ export default function DashboardClient() {
             </button>
           </div>
 
-          {/* TF Buttons */}
+          {/* TF Buttons (kept) */}
           <div className="flex gap-2 flex-wrap items-center">
             {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
               <button
                 key={k}
                 onClick={() => setTf(k)}
                 className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
-                  tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
+                  tf === k
+                    ? "bg-white text-[#020617] font-bold"
+                    : "bg-white/5 text-white/80 hover:bg-white/10"
                 }`}
               >
                 {k.toUpperCase()}
@@ -406,7 +420,7 @@ export default function DashboardClient() {
           </div>
         </div>
 
-        {/* Secondary row: Auto + Rank + Filter input + Filters button */}
+        {/* Secondary row */}
         <div className="mt-3 flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="text-sm text-white/70">
@@ -457,8 +471,8 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* TABLE (DexCheck-ish) */}
-      <div className="mt-4 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
+      {/* TABLE */}
+      <div className="mx-auto max-w-6xl mt-4 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
         <div className="min-w-[1280px]">
           <div className="grid grid-cols-14 gap-0 px-4 py-3 text-xs font-bold text-white/70 border-b border-white/10">
             <div>#</div>
@@ -485,27 +499,21 @@ export default function DashboardClient() {
               const sells = r.txns?.h24?.sells ?? 0;
               const txns = buys + sells;
               const pc = r.priceChange || {};
+              const addr = (r.baseToken?.address || "").toLowerCase();
 
               return (
-                <a
-                  key={r.baseToken.address}
-                  href={r.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
+                <div
+                  key={`${addr}:${r.pairAddress}`}
+                  onClick={() => router.push(`/token/${addr}`)}
+                  className="cursor-pointer grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
                 >
                   <div className="text-white/80 font-bold">{i + 1}</div>
 
                   <div className="col-span-3 flex items-center gap-3 min-w-0">
-                    {/* icon with fallback */}
                     <div className="h-9 w-9 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
                       {r.info?.imageUrl ? (
-                        <img
-                          src={r.info.imageUrl}
-                          alt=""
-                          className="h-9 w-9 object-cover"
-                          loading="lazy"
-                        />
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={r.info.imageUrl} alt="" className="h-9 w-9 object-cover" loading="lazy" />
                       ) : (
                         <span className="font-extrabold text-white">
                           {(r.baseToken?.symbol || "?").slice(0, 1).toUpperCase()}
@@ -530,20 +538,39 @@ export default function DashboardClient() {
                   <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
                   <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
 
-                  {/* % columns */}
                   {pctCell(pc.m5)}
                   {pctCell(pc.h1)}
                   {pctCell(pc.h6)}
                   {pctCell(pc.h24)}
 
-                  <div className="text-white/80">{fmtUsd(r.fdv)}</div>
-                </a>
+                  <div className="text-white/80 flex items-center gap-2">
+                    <span>{fmtUsd(r.fdv)}</span>
+
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="ml-auto rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                      title="Open on DexScreener"
+                    >
+                      ↗
+                    </a>
+                  </div>
+                </div>
               );
             })}
         </div>
       </div>
 
-      {/* FILTERS PANEL (slide over) */}
+      {/* ✅ Bottom Ad (only renders if slot exists) */}
+      <div className="mx-auto max-w-6xl mt-4">
+        {AD_SLOT_BOTTOM && (
+          <AdUnit slot={AD_SLOT_BOTTOM} className="glass ring-soft rounded-2xl p-3" />
+        )}
+      </div>
+
+      {/* FILTERS PANEL */}
       {filtersOpen && (
         <div className="fixed inset-0 z-[999]">
           <button
