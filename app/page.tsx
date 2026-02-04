@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import ContractAddress from "./components/ContractAddress";
+import ImgFallback from "./components/ImgFallback";
 
 type DexPair = {
   chainId: string;
@@ -15,7 +16,6 @@ type DexPair = {
   volume?: { h24?: number };
   txns?: { h24?: { buys?: number; sells?: number } };
 
-  // ✅ DexScreener token icon (often present)
   info?: { imageUrl?: string };
 };
 
@@ -33,13 +33,6 @@ function fmtPriceUsd(s?: string) {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 8 })}`;
 }
 
-/**
- * ✅ Popular-only trending:
- * - Pull bigger pool (multi queries)
- * - Filter spam (MIN_LIQ, MIN_VOL)
- * - Dedupe by base token (best pool per token)
- * - Sort by volume then liquidity
- */
 async function getTrendingBasePairs(): Promise<DexPair[]> {
   const queries = ["base", "base usdc", "base weth", "base meme", "base degen"];
 
@@ -57,13 +50,10 @@ async function getTrendingBasePairs(): Promise<DexPair[]> {
     })
   );
 
-  const pairs = results
-    .flat()
-    .filter((p) => (p.chainId || "").toLowerCase() === "base");
+  const pairs = results.flat().filter((p) => (p.chainId || "").toLowerCase() === "base");
 
-  // ✅ Popularity filters (tune anytime)
-  const MIN_LIQ = 20_000; // $20k liquidity
-  const MIN_VOL = 10_000; // $10k 24h volume
+  const MIN_LIQ = 20_000;
+  const MIN_VOL = 10_000;
 
   const filtered = pairs.filter((p) => {
     const liq = p.liquidity?.usd ?? 0;
@@ -71,7 +61,6 @@ async function getTrendingBasePairs(): Promise<DexPair[]> {
     return liq >= MIN_LIQ && vol >= MIN_VOL;
   });
 
-  // ✅ Dedupe: keep best pool per token (liquidity first, then volume)
   const bestByToken = new Map<string, DexPair>();
 
   for (const p of filtered) {
@@ -91,9 +80,9 @@ async function getTrendingBasePairs(): Promise<DexPair[]> {
     }
   }
 
-  const uniqueTokens = Array.from(bestByToken.values());
+  const unique = Array.from(bestByToken.values());
 
-  uniqueTokens.sort((a, b) => {
+  unique.sort((a, b) => {
     const av = a.volume?.h24 ?? 0;
     const bv = b.volume?.h24 ?? 0;
     const al = a.liquidity?.usd ?? 0;
@@ -103,7 +92,7 @@ async function getTrendingBasePairs(): Promise<DexPair[]> {
     return bl - al;
   });
 
-  return uniqueTokens.slice(0, 6);
+  return unique.slice(0, 6);
 }
 
 export default async function Home() {
@@ -111,7 +100,7 @@ export default async function Home() {
 
   return (
     <main className="relative min-h-screen bg-[#020617] text-white px-6 py-14 md:py-20 overflow-hidden">
-      {/* BACKGROUND GLOW */}
+      {/* Glow */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute top-[-220px] left-[-220px] h-[520px] w-[520px] rounded-full bg-blue-600/30 blur-[160px]" />
         <div className="absolute top-[80px] right-[-220px] h-[520px] w-[520px] rounded-full bg-cyan-500/20 blur-[160px]" />
@@ -127,10 +116,9 @@ export default async function Home() {
             width={420}
             height={110}
             priority
-            className="object-contain"
           />
 
-          <h1 className="mt-6 text-4xl md:text-5xl font-extrabold leading-tight drop-shadow-[0_0_25px_rgba(59,130,246,0.35)]">
+          <h1 className="mt-6 text-4xl md:text-5xl font-extrabold">
             Track Base Tokens in Real-Time
           </h1>
 
@@ -138,174 +126,116 @@ export default async function Home() {
             Watch liquidity, volume, holders, and smart money moves instantly.
           </p>
 
-          {/* FEATURE TILE */}
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs uppercase tracking-wider text-white/80 font-semibold">
-              What you can do
-            </p>
-
-            <ul className="mt-3 space-y-2 text-white/80">
-              <li className="flex gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
-                Live token metrics (price, volume, liquidity)
-              </li>
-
-              <li className="flex gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
-                Quick token lookup via contract address
-              </li>
-
-              <li className="flex gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
-                Trending & new pairs tracking
-              </li>
-
-              <li className="flex gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
-                Fast filtering for gems & risks
-              </li>
-            </ul>
-          </div>
-
-          {/* CONTRACT */}
           <div className="mt-6">
             <ContractAddress />
           </div>
 
-          {/* CTA BUTTONS */}
-          <div className="mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4">
+          <div className="mt-8 flex gap-3 flex-wrap">
             <Link
               href="/dashboard"
-              className="relative inline-flex items-center justify-center
-                         px-7 py-3 rounded-xl font-bold text-white
-                         bg-gradient-to-r from-blue-500 via-cyan-500 to-indigo-500
-                         bg-[length:200%_200%] animate-gradient
-                         shadow-lg shadow-blue-500/25
-                         hover:shadow-cyan-500/40
-                         hover:-translate-y-0.5
-                         active:translate-y-0
-                         transition-all duration-200 text-center"
+              className="px-6 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500"
             >
-              🚀 Explore Live Dashboard
+              🚀 Dashboard
             </Link>
 
             <Link
               href="/token"
-              className="px-6 py-3 bg-white text-[#020617]
-                         rounded-xl font-bold hover:opacity-90
-                         transition text-center"
+              className="px-6 py-3 bg-white text-black rounded-xl font-bold"
             >
-              Look Up a Token
+              🔍 Lookup
             </Link>
           </div>
         </div>
 
         {/* TRENDING */}
         <section className="mt-12">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <h2 className="text-xl md:text-2xl font-extrabold">🔥 Trending on Base</h2>
-              <p className="mt-1 text-sm text-white/60">
-                Popular pairs only (filtered). Auto refresh every ~30s.
-              </p>
-            </div>
+          <h2 className="text-2xl font-extrabold mb-4">🔥 Trending on Base</h2>
 
-            <Link
-              href="/dashboard"
-              className="hidden sm:inline-flex px-4 py-2 rounded-xl
-                         bg-white/10 border border-white/10
-                         hover:bg-white/15 transition
-                         text-sm font-bold"
-            >
-              View All →
-            </Link>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {trending.length === 0 ? (
-              <div className="text-white/60">No data right now. Please refresh.</div>
+              <div className="text-white/60">No data.</div>
             ) : (
               trending.map((p) => {
                 const buys = p.txns?.h24?.buys ?? 0;
                 const sells = p.txns?.h24?.sells ?? 0;
                 const txns = buys + sells;
 
-                const icon = p.info?.imageUrl || "/token-placeholder.png";
-                const pairLabel = `${p.baseToken?.symbol ?? "—"} / ${p.quoteToken?.symbol ?? "—"}`;
+                const pair = `${p.baseToken?.symbol ?? "—"} / ${
+                  p.quoteToken?.symbol ?? "—"
+                }`;
+
+                const addr = p.baseToken?.address?.toLowerCase();
 
                 return (
-                  <a
+                  <div
                     key={p.pairAddress}
-                    href={p.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/10 transition
-                               shadow-[0_0_0_1px_rgba(255,255,255,0.03)]
-                               hover:shadow-[0_0_0_1px_rgba(59,130,246,0.25)]"
-                    title="Open on DexScreener"
+                    className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/10 transition"
                   >
-                    {/* Top row */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <img
-                          src={icon}
-                          alt=""
-                          className="h-10 w-10 rounded-xl bg-black/30 border border-white/10 object-cover"
-                          loading="lazy"
-                        />
+                    <Link href={`/zora/coin/${addr}`} className="block">
+                      {/* Header */}
+                      <div className="flex justify-between gap-3">
+                        <div className="flex gap-3 min-w-0">
+                          <ImgFallback
+                            src={p.info?.imageUrl}
+                            fallback="/token-placeholder.png"
+                            alt={pair}
+                            className="h-10 w-10 rounded-xl object-cover border border-white/10"
+                          />
 
-                        <div className="min-w-0">
-                          <div className="text-sm text-white/60">PAIR</div>
-                          <div className="text-lg font-extrabold truncate">{pairLabel}</div>
-                          <div className="text-xs text-white/50 truncate">{p.baseToken?.name ?? ""}</div>
+                          <div className="min-w-0">
+                            <div className="font-bold truncate">{pair}</div>
+                            <div className="text-xs text-white/50 truncate">
+                              {p.baseToken?.name}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-xs text-white/60">PRICE</div>
+                          <div className="font-bold">
+                            {fmtPriceUsd(p.priceUsd)}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <div className="text-xs text-white/60">PRICE</div>
-                        <div className="font-extrabold">{fmtPriceUsd(p.priceUsd)}</div>
-                      </div>
-                    </div>
+                      {/* Stats */}
+                      <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                        <div className="bg-black/30 p-2 rounded-lg">
+                          <div className="text-xs text-white/60">VOL</div>
+                          {fmtUsd(p.volume?.h24)}
+                        </div>
 
-                    {/* Stat chips */}
-                    <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                      <div className="rounded-xl bg-black/25 border border-white/10 p-3">
-                        <div className="text-[11px] tracking-wide text-white/60">24H VOL</div>
-                        <div className="font-extrabold">{fmtUsd(p.volume?.h24)}</div>
-                      </div>
+                        <div className="bg-black/30 p-2 rounded-lg">
+                          <div className="text-xs text-white/60">LIQ</div>
+                          {fmtUsd(p.liquidity?.usd)}
+                        </div>
 
-                      <div className="rounded-xl bg-black/25 border border-white/10 p-3">
-                        <div className="text-[11px] tracking-wide text-white/60">LIQ</div>
-                        <div className="font-extrabold">{fmtUsd(p.liquidity?.usd)}</div>
-                      </div>
-
-                      <div className="rounded-xl bg-black/25 border border-white/10 p-3">
-                        <div className="text-[11px] tracking-wide text-white/60">TXNS</div>
-                        <div className="font-extrabold">{txns.toLocaleString()}</div>
-                        <div className="text-[11px] text-white/50">
-                          {buys}/{sells}
+                        <div className="bg-black/30 p-2 rounded-lg">
+                          <div className="text-xs text-white/60">TXNS</div>
+                          {txns}
                         </div>
                       </div>
-                    </div>
 
-                    <div className="mt-3 text-xs text-white/50 group-hover:text-white/70 transition">
-                      Click to open on DexScreener →
+                      <div className="mt-3 text-xs text-white/50">
+                        View Token →
+                      </div>
+                    </Link>
+
+                    {/* External */}
+                    <div className="mt-2">
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs underline text-white/50 hover:text-blue-400"
+                      >
+                        DexScreener ↗
+                      </a>
                     </div>
-                  </a>
+                  </div>
                 );
               })
             )}
-          </div>
-
-          <div className="mt-5 sm:hidden">
-            <Link
-              href="/dashboard"
-              className="inline-flex w-full justify-center px-4 py-3
-                         rounded-xl bg-white/10 border border-white/10
-                         hover:bg-white/15 transition text-sm font-bold"
-            >
-              View All →
-            </Link>
           </div>
         </section>
       </div>

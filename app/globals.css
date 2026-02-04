@@ -102,7 +102,6 @@
 /* Base Styles                       */
 /* -------------------------------- */
 @layer base {
-
   * {
     @apply border-border outline-ring/50;
   }
@@ -110,12 +109,21 @@
   html {
     color-scheme: dark;
     background: #020617;
+
+    /* ✅ Prevent layout shift when scrollbar appears */
+    scrollbar-gutter: stable both-edges;
+
+    /* ✅ Extra safety */
+    width: 100%;
+    overflow-x: hidden;
   }
 
   body {
     @apply bg-background text-foreground;
 
     min-height: 100vh;
+    width: 100%;
+    overflow-x: hidden;
 
     /* Premium background */
     background-image:
@@ -126,7 +134,45 @@
       radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1px, transparent 0);
 
     background-size: auto, auto, auto, auto, 28px 28px;
-    background-attachment: fixed;
+
+    /* ✅ Mobile friendly (fixed backgrounds can cause jank/overflow on mobile) */
+    background-attachment: scroll;
+  }
+
+  /* ✅ Enable fixed background only on desktop */
+  @media (min-width: 1024px) {
+    body {
+      background-attachment: fixed;
+    }
+  }
+
+  /* ✅ Prevent child elements from forcing horizontal scroll */
+  body > * {
+    min-width: 0;
+  }
+
+  /* ✅ Media never overflow */
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* ✅ Long wallet addresses / URLs won’t break mobile layout */
+  a,
+  p,
+  span,
+  div {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* ✅ Better mobile tap feel */
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
   }
 
   ::selection {
@@ -155,9 +201,18 @@
 }
 
 /* -------------------------------- */
+/* Utilities (Reusable)              */
+/* -------------------------------- */
+@layer utilities {
+  /* ✅ Use this to keep pages perfectly fitted everywhere */
+  .page-container {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+}
+
+/* -------------------------------- */
 /* Reusable UI Helpers               */
 /* -------------------------------- */
-
 .glass {
   background: rgba(2,6,23,.65);
   border: 1px solid rgba(255,255,255,.08);
@@ -181,7 +236,6 @@
 /* -------------------------------- */
 /* AdSense Fix (White Block Bug)     */
 /* -------------------------------- */
-
 ins.adsbygoogle {
   background: transparent !important;
 }

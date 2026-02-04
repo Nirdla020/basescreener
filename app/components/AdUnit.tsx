@@ -14,33 +14,80 @@ export default function AdUnit({
   format = "auto",
   responsive = true,
   minHeight = 120,
+
+  // ✅ Gate rendering from pages (prevents AdSense “no publisher content” flags)
+  enabled = true,
+
+  // ✅ Optional: hide the entire box if there’s no fill
+  hideIfNoFill = true,
+
+  // ✅ Optional: delay push a bit (helps avoid pushing during suspense/layout shifts)
+  delayMs = 250,
 }: {
   slot: string;
   className?: string;
   format?: string;
   responsive?: boolean;
   minHeight?: number;
+  enabled?: boolean;
+  hideIfNoFill?: boolean;
+  delayMs?: number;
 }) {
-  const insRef = useRef<HTMLDivElement | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  // ✅ <ins> doesn't have HTMLInsElement in TS DOM typings — use HTMLElement
+  const insRef = useRef<HTMLElement | null>(null);
+
+  // Prevent double-push for same mounted <ins>
+  const pushedRef = useRef(false);
+
+  // Track fill state (null = unknown, true/false = checked)
+  const [hasFill, setHasFill] = useState<boolean | null>(null);
+
+  // Reset when slot changes or ad gets disabled/enabled
+  useEffect(() => {
+    setHasFill(null);
+    pushedRef.current = false;
+
+    // If you toggle enabled off, clear injected ad content (avoid stale frames)
+    if (!enabled && insRef.current) {
+      insRef.current.innerHTML = "";
+    }
+  }, [slot, enabled]);
 
   useEffect(() => {
-    // Avoid pushing multiple times for the same slot mount
-    const t = setTimeout(() => {
+    // ✅ Don’t even attempt if disabled or missing slot
+    if (!enabled) return;
+    if (!slot) return;
+    if (!insRef.current) return;
+
+    // ✅ Avoid pushing multiple times for the same mount
+    if (pushedRef.current) return;
+    pushedRef.current = true;
+
+    const pushTimer = window.setTimeout(() => {
       try {
         (window.adsbygoogle = window.adsbygoogle || []).push({});
-        // If ad loads, AdSense usually injects iframe into the ins element
-        setTimeout(() => {
-          const hasIframe = !!insRef.current?.querySelector("iframe");
-          if (hasIframe) setLoaded(true);
-        }, 800);
       } catch {
         // ignore
       }
-    }, 50);
+    }, delayMs);
 
-    return () => clearTimeout(t);
-  }, [slot]);
+    // ✅ Check for fill after AdSense has time to inject iframe
+    const fillTimer = window.setTimeout(() => {
+      const iframe = insRef.current?.querySelector("iframe");
+      setHasFill(!!iframe);
+    }, Math.max(1200, delayMs + 900));
+
+    return () => {
+      window.clearTimeout(pushTimer);
+      window.clearTimeout(fillTimer);
+    };
+  }, [enabled, slot, delayMs]);
+
+  // ✅ If disabled, render nothing (best for policy + avoids empty ad screens)
+  if (!enabled || !slot) return null;
+
+  // ✅ If no fill and you want to hide empty boxes
+  if (hideIfNoFill && hasFill === false) return null;
 
   return (
     <div
@@ -61,12 +108,6 @@ export default function AdUnit({
           data-ad-format={format}
           data-full-width-responsive={responsive ? "true" : "false"}
         />
-
-        {!loaded && (
-          <div className="mt-3 text-xs text-white/40">
-            Ad is loading… (If AdSense has no fill yet, this stays empty.)
-          </div>
-        )}
       </div>
     </div>
   );

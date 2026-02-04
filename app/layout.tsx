@@ -11,15 +11,12 @@ import { Analytics } from "@vercel/analytics/react";
 /* ✅ Global SEO Metadata */
 export const metadata: Metadata = {
   metadataBase: new URL("https://basescreener.fun"),
-
   title: {
     default: "BaseScreener — Real-Time Base Token Screener",
     template: "%s | BaseScreener",
   },
-
   description:
     "Track Base tokens in real-time with live price, volume, liquidity, and trending movers. Fast Base token screener and analytics.",
-
   keywords: [
     "Base screener",
     "Base token screener",
@@ -31,11 +28,9 @@ export const metadata: Metadata = {
     "Base analytics",
     "onchain analytics Base",
   ],
-
   alternates: {
     canonical: "https://basescreener.fun",
   },
-
   robots: {
     index: true,
     follow: true,
@@ -47,7 +42,6 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
-
   openGraph: {
     type: "website",
     url: "https://basescreener.fun",
@@ -64,7 +58,6 @@ export const metadata: Metadata = {
       },
     ],
   },
-
   twitter: {
     card: "summary_large_image",
     title: "BaseScreener — Real-Time Base Token Screener",
@@ -73,7 +66,6 @@ export const metadata: Metadata = {
     creator: "@basescreenfun",
     images: ["/og.png"],
   },
-
   other: {
     "google-adsense-account": "ca-pub-2273778994224812",
   },
@@ -99,17 +91,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <body className="min-h-screen">
-        {/* Google AdSense */}
+      <body className="min-h-screen bg-[#020617] text-white overflow-x-hidden">
+        {/* ✅ Google AdSense script (safe to keep global). 
+            Using lazyOnload reduces chance of pushing ads during initial skeletons. */}
         <Script
           id="adsense"
           async
-          strategy="afterInteractive"
+          strategy="lazyOnload"
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2273778994224812"
           crossOrigin="anonymous"
         />
 
-        {/* Structured Data */}
+        {/* ✅ Structured Data */}
         <Script
           id="json-ld"
           type="application/ld+json"
@@ -117,18 +110,26 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
 
-        <TopBar />
+        <div className="min-h-screen flex flex-col">
+          <TopBar />
 
-        <Suspense fallback={<div className="h-14" />}>
-          <Navbar />
-        </Suspense>
+          <Suspense fallback={<div className="h-14" />}>
+            <Navbar />
+          </Suspense>
 
-        <main className="min-h-screen">
-          {children}
-          <SupportCTA />
-        </main>
+          {/* ✅ Main content area */}
+          {/* IMPORTANT: Don't double-wrap children with a max-width container here,
+              because pages like Dashboard already add their own container.
+              Let each page control its layout. */}
+          <main className="flex-1 w-full">{children}</main>
 
-        <FooterSupport />
+          {/* Keep CTA aligned nicely */}
+          <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+            <SupportCTA />
+          </div>
+
+          <FooterSupport />
+        </div>
 
         <Analytics />
       </body>

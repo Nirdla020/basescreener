@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import AdUnit from "../../components/AdUnit"; // ✅ FIXED PATH (from app/(site)/token -> app/components)
 
 type DexPair = {
   chainId: string;
@@ -24,6 +25,7 @@ function isAddress(a: string) {
 
 function fmtUsd(n?: number) {
   if (n === undefined || n === null) return "—";
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `$${Math.round(n).toLocaleString()}`;
   return `$${n.toFixed(2)}`;
@@ -51,45 +53,58 @@ function writeWatchlist(list: string[]) {
   localStorage.setItem("watchlist_base", JSON.stringify(list));
 }
 
-export default function TokenClient() {
+export default function TokenClient({ addressFromRoute }: { addressFromRoute?: string }) {
   const sp = useSearchParams();
+  const lastAutoRef = useRef<string>(""); // ✅ prevent repeated auto-search
 
   const [address, setAddress] = useState("");
   const [pairs, setPairs] = useState<DexPair[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const [watchlistCount, setWatchlistCount] = useState(0);
+  const [watchCount, setWatchCount] = useState(0);
 
   const normalized = useMemo(() => address.trim(), [address]);
 
-  // ✅ Pull ?q= from URL (from Navbar) and auto-run search once
+  // ✅ Put your REAL AdSense slot IDs here (from AdSense)
+  const AD_SLOT_TOP = "PUT_SLOT_ID_HERE";
+  const AD_SLOT_BOTTOM = "PUT_SLOT_ID_HERE";
+
+  // ✅ AdSense-safe gating: show ads ONLY when there are real results
+  const hasContent = pairs.length > 0;
+  const canShowAds = !loading && error === "" && hasContent;
+
   useEffect(() => {
-    const q = (sp.get("q") || "").trim();
-    if (!q) return;
-
-    setAddress(q);
-
-    // auto-search only if it's an address
-    if (isAddress(q)) {
-      // small delay so state is updated before fetch
-      setTimeout(() => {
-        searchBaseToken(q);
-      }, 0);
-    } else {
-      setError("Search on Token page needs a 0x address. Paste a token address.");
-      setPairs([]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp]);
-
-  // ✅ watchlist count
-  useEffect(() => {
-    setWatchlistCount(readWatchlist().length);
+    setWatchCount(readWatchlist().length);
   }, []);
 
-  async function searchBaseToken(forced?: string) {
-    const a = (forced ?? normalized).trim();
+  // ✅ auto-fill from route param OR ?q=
+  useEffect(() => {
+    const fromRoute = (addressFromRoute || "").trim();
+    const fromQuery = (sp.get("q") || "").trim();
+    const qRaw = fromRoute || fromQuery;
+    if (!qRaw) return;
+
+    const q = qRaw.toLowerCase().trim();
+    setAddress(q);
+
+    if (!isAddress(q)) {
+      setError("Token page accepts only a 0x address.");
+      setPairs([]);
+      return;
+    }
+
+    // ✅ avoid repeating auto-search
+    if (lastAutoRef.current === q) return;
+    lastAutoRef.current = q;
+
+    setTimeout(() => {
+      searchToken(q);
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressFromRoute, sp]);
+
+  async function searchToken(forced?: string) {
+    const a = (forced ?? normalized).trim().toLowerCase();
 
     if (!isAddress(a)) {
       setError("Invalid address. Must be 0x + 40 hex characters.");
@@ -112,7 +127,12 @@ export default function TokenClient() {
       }
 
       const data = (await res.json()) as DexPair[];
-      setPairs(Array.isArray(data) ? data : []);
+      const arr = Array.isArray(data) ? data : [];
+      setPairs(arr);
+
+      if (arr.length === 0) {
+        setError("No pools found for this token on Base (DexScreener returned 0 pairs).");
+      }
     } catch (e: any) {
       setError(e?.message || "Failed to fetch DexScreener data");
     } finally {
@@ -122,6 +142,7 @@ export default function TokenClient() {
 
   function addToWatchlist() {
     const a = normalized.toLowerCase();
+
     if (!isAddress(a)) {
       setError("Invalid address. Cannot add.");
       return;
@@ -140,90 +161,97 @@ export default function TokenClient() {
 
     const next = [...current, a];
     writeWatchlist(next);
-    setWatchlistCount(next.length);
+    setWatchCount(next.length);
     setError("");
     alert("Added to watchlist ✅ (Go to /dashboard → Saved tab)");
   }
 
-  const topPairs = useMemo(() => {
-    return [...pairs].sort((a, b) => {
-      const la = a.liquidity?.usd ?? 0;
-      const lb = b.liquidity?.usd ?? 0;
-      if (lb !== la) return lb - la;
-      const va = a.volume?.h24 ?? 0;
-      const vb = b.volume?.h24 ?? 0;
-      return vb - va;
-    });
+  const sortedPairs = useMemo(() => {
+    return [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
   }, [pairs]);
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white px-6 py-10">
-      <div className="mx-auto max-w-6xl">
-        <h1 className="text-4xl font-extrabold text-blue-400 mb-2">Token Lookup (Base)</h1>
-        <p className="text-blue-200 mb-6">
-          Paste Base token address. Add it to your watchlist. (Saved locally)
+    <div className="page-container py-10 text-white">
+      <div className="text-white/60 text-sm mb-2">Token page loaded ✅</div>
+
+      <h1 className="text-4xl font-extrabold text-blue-400 mb-2">Token Lookup (Base)</h1>
+      <p className="text-blue-200 mb-6">Paste a Base token address. Add it to your watchlist (saved locally).</p>
+
+      {/* ✅ Publisher content */}
+      <div className="rounded-2xl bg-white/5 border border-white/10 p-5 text-sm text-white/70 leading-relaxed mb-4">
+        <p>
+          This page shows liquidity pools and market activity for a Base token using DexScreener data. Results include
+          price, liquidity, 24h volume, and transaction counts per pool.
         </p>
+        <p className="mt-2 text-white/50">Disclaimer: This is informational only and not financial advice.</p>
+      </div>
 
-        {/* ✅ More visible search bar */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex flex-col md:flex-row gap-3">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 rounded-2xl border border-blue-500/40 bg-black/40 px-4 py-3 focus-within:border-blue-400">
-                <span className="text-white/70">🔎</span>
-                <input
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") searchBaseToken();
-                  }}
-                  placeholder="Paste Base token address (0x...)"
-                  className="w-full bg-transparent outline-none text-white placeholder:text-white/55"
-                />
-              </div>
-              <div className="mt-2 text-xs text-white/50">
-                Tip: Token page accepts only a <span className="font-mono">0x...</span> address.
-              </div>
+      {/* ✅ Top Ad (ONLY when real results exist) */}
+      {AD_SLOT_TOP && (
+        <div className="mb-4">
+          <AdUnit slot={AD_SLOT_TOP} enabled={canShowAds} className="glass ring-soft rounded-2xl p-3" />
+        </div>
+      )}
+
+      {/* Search bar */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex flex-col md:flex-row gap-3">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 rounded-2xl border border-blue-500/40 bg-black/40 px-4 py-3 focus-within:border-blue-400">
+              <span className="text-white/70">🔎</span>
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") searchToken();
+                }}
+                placeholder="Paste Base token address (0x...)"
+                className="w-full bg-transparent outline-none text-white placeholder:text-white/55"
+              />
             </div>
-
-            <button
-              onClick={() => searchBaseToken()}
-              className="px-6 py-3 bg-blue-600 rounded-xl font-bold hover:bg-blue-500 transition"
-            >
-              Search
-            </button>
-
-            <button
-              onClick={addToWatchlist}
-              className="px-6 py-3 bg-white text-[#020617] rounded-xl font-bold hover:opacity-90 transition"
-            >
-              Add to Watchlist ({watchlistCount})
-            </button>
+            <div className="mt-2 text-xs text-white/50">
+              Tip: This page accepts only a <span className="font-mono">0x...</span> address.
+            </div>
           </div>
 
-          {loading && <div className="mt-4 text-blue-100">Loading pools…</div>}
-          {error && <div className="mt-4 text-red-300 break-words">{error}</div>}
+          <button
+            onClick={() => searchToken()}
+            className="px-6 py-3 bg-blue-600 rounded-xl font-bold hover:bg-blue-500 transition"
+          >
+            Open Token
+          </button>
+
+          <button
+            onClick={addToWatchlist}
+            className="px-6 py-3 bg-white text-[#020617] rounded-xl font-bold hover:opacity-90 transition"
+          >
+            Add to Watchlist ({watchCount})
+          </button>
         </div>
 
-        {/* RESULTS */}
-        {topPairs.length > 0 && (
-          <div className="mt-6 space-y-4">
-            {topPairs.slice(0, 10).map((p) => (
+        {loading && <div className="mt-4 text-blue-100">Loading pools…</div>}
+        {error && <div className="mt-4 text-red-300 break-words">{error}</div>}
+      </div>
+
+      {/* Results */}
+      {sortedPairs.length > 0 && (
+        <div className="mt-6 space-y-4">
+          {sortedPairs.slice(0, 12).map((p) => {
+            const txns = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
+
+            return (
               <a
                 key={p.pairAddress}
                 href={p.url}
                 target="_blank"
                 rel="noreferrer"
                 className="block rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/10 transition"
-                title="Open on DexScreener"
               >
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-xl font-extrabold">
                       {p.baseToken.symbol}/{p.quoteToken.symbol}
-                      <span className="text-white/50 text-sm font-normal">
-                        {" "}
-                        • {p.dexId || "dex"} • Base
-                      </span>
+                      <span className="text-white/50 text-sm font-normal"> • {p.dexId || "dex"} • Base</span>
                     </div>
 
                     <div className="text-white/60 text-sm mt-1 break-all">
@@ -236,20 +264,33 @@ export default function TokenClient() {
                   </div>
 
                   <div className="text-sm text-white/70 md:text-right">
-                    <div>Liquidity: <span className="font-bold">{fmtUsd(p.liquidity?.usd)}</span></div>
-                    <div>Vol 24h: <span className="font-bold">{fmtUsd(p.volume?.h24)}</span></div>
                     <div>
-                      Buys/Sells:{" "}
-                      <span className="font-bold">{p.txns?.h24?.buys ?? 0}</span>/
+                      Liquidity: <span className="font-bold">{fmtUsd(p.liquidity?.usd)}</span>
+                    </div>
+                    <div>
+                      Vol 24h: <span className="font-bold">{fmtUsd(p.volume?.h24)}</span>
+                    </div>
+                    <div>
+                      Txns: <span className="font-bold">{txns.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      Buys/Sells: <span className="font-bold">{p.txns?.h24?.buys ?? 0}</span>/
                       <span className="font-bold">{p.txns?.h24?.sells ?? 0}</span>
                     </div>
                   </div>
                 </div>
               </a>
-            ))}
-          </div>
-        )}
-      </div>
-    </main>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ✅ Bottom Ad (ONLY when real results exist) */}
+      {AD_SLOT_BOTTOM && (
+        <div className="mt-6">
+          <AdUnit slot={AD_SLOT_BOTTOM} enabled={canShowAds} className="glass ring-soft rounded-2xl p-3" />
+        </div>
+      )}
+    </div>
   );
 }

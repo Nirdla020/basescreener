@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Highlights from "../components/Highlights";
 import AdUnit from "../components/AdUnit";
@@ -25,6 +25,8 @@ type DexPair = {
   pairCreatedAt?: number;
   info?: { imageUrl?: string };
 };
+
+type DexPairWithSeen = DexPair & { __seenAt?: number };
 
 type Tab = "trending" | "new" | "top" | "saved";
 type TF = "5m" | "1h" | "6h" | "24h";
@@ -70,6 +72,7 @@ function fmtAge(ts?: number) {
   return `${days}d`;
 }
 
+/** ===== Watchlist (localStorage) ===== */
 function readSaved(): string[] {
   try {
     const raw = localStorage.getItem("watchlist_base") || "[]";
@@ -81,6 +84,52 @@ function readSaved(): string[] {
   }
 }
 
+function writeSaved(list: string[]) {
+  try {
+    localStorage.setItem("watchlist_base", JSON.stringify(list));
+  } catch {}
+}
+
+function isSaved(addr?: string) {
+  if (!addr) return false;
+  const a = addr.toLowerCase();
+  return readSaved().some((x) => x.toLowerCase() === a);
+}
+
+function toggleSaved(addr?: string) {
+  if (!addr) return false;
+  const a = addr.toLowerCase();
+  const cur = readSaved().map((x) => x.toLowerCase());
+  const exists = cur.includes(a);
+
+  const next = exists ? cur.filter((x) => x !== a) : [a, ...cur];
+  writeSaved(next);
+  return !exists; // true if now saved
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** ===== Trending score ===== */
 function trendingScore(p: DexPair) {
   const vol = p.volume?.h24 ?? 0;
   const liq = p.liquidity?.usd ?? 0;
@@ -111,7 +160,7 @@ export default function DashboardClient() {
   const router = useRouter();
 
   const [tab, setTab] = useState<Tab>("trending");
-  const [tf, setTf] = useState<TF>("24h"); // kept for future
+  const [tf, setTf] = useState<TF>("24h"); // visual only for now
   const [rankBy, setRankBy] = useState<RankBy>("trending");
 
   const [auto, setAuto] = useState(true);
@@ -120,7 +169,7 @@ export default function DashboardClient() {
   const [query, setQuery] = useState("");
   const [tokenAddr, setTokenAddr] = useState("");
 
-  const [rows, setRows] = useState<DexPair[]>([]);
+  const [rows, setRows] = useState<DexPairWithSeen[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -131,50 +180,124 @@ export default function DashboardClient() {
   const [minTxns, setMinTxns] = useState<number>(0);
   const [onlyWithIcon, setOnlyWithIcon] = useState(false);
 
+  // watchlist rerender tick
+  const [watchTick, setWatchTick] = useState(0);
+
+  // toast
+  const [toast, setToast] = useState<string>("");
+
+  function showToast(msg: string) {
+    setToast(msg);
+    window.clearTimeout((showToast as any)._t);
+    (showToast as any)._t = window.setTimeout(() => setToast(""), 1100);
+  }
+
+  const savedCount = useMemo(() => readSaved().length, [watchTick]);
+
+  // discovery pool + abort (prevents request races)
+  const poolRef = useRef<Map<string, DexPairWithSeen>>(new Map());
+  const abortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     const qp = sp.get("q") || "";
     if (qp) setQuery(qp);
   }, [sp]);
 
+  // when switching tabs, clear address search (so it doesn't "lock" the list)
+  useEffect(() => {
+    setTokenAddr("");
+  }, [tab]);
+
   async function loadFromSearch() {
-    const queries = ["base", "base usdc", "base weth", "base meme", "base ai", "base degen"];
+    const TRENDING_QUERIES = [
+      "base",
+      "base usdc",
+      "base weth",
+      "base degen",
+      "base meme",
+      "base ai",
+      "aerodrome base",
+      "base microcap",
+      "base token",
+    ];
+
+    const NEW_DISCOVERY_QUERIES = [
+      "base fair launch",
+      "base launch",
+      "base new token",
+      "base presale",
+      "base pump",
+      "base community",
+      "base telegram",
+      "base ca",
+      "base coin",
+      "base low cap",
+    ];
+
+    const rotate = Math.floor(Date.now() / 60_000) % NEW_DISCOVERY_QUERIES.length;
+    const rotatedNew = [...NEW_DISCOVERY_QUERIES.slice(rotate), ...NEW_DISCOVERY_QUERIES.slice(0, rotate)].slice(0, 6);
+
+    const queries = [...TRENDING_QUERIES, ...rotatedNew];
+
+    // abort previous request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const results = await Promise.all(
       queries.map(async (q) => {
-        const res = await fetch(
-          `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`,
-          { cache: "no-store" }
-        );
+        const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         if (!res.ok) return [];
         const data = await res.json();
         return Array.isArray(data?.pairs) ? (data.pairs as DexPair[]) : [];
       })
     );
 
+    const now = Date.now();
     const pairs = results.flat().filter((p) => (p.chainId || "").toLowerCase() === "base");
 
-    // Dedup pairAddress: keep best liq
-    const map = new Map<string, DexPair>();
+    // accumulate into pool (dedup by pairAddress; keep better liquidity)
     for (const p of pairs) {
       const key = (p.pairAddress || "").toLowerCase();
       if (!key) continue;
-      const cur = map.get(key);
+
+      const cur = poolRef.current.get(key);
       const liq = p.liquidity?.usd ?? 0;
       const curLiq = cur?.liquidity?.usd ?? -1;
-      if (!cur || liq > curLiq) map.set(key, p);
+
+      if (!cur) {
+        poolRef.current.set(key, { ...p, __seenAt: now });
+      } else if (liq > curLiq) {
+        poolRef.current.set(key, { ...p, __seenAt: cur.__seenAt ?? now });
+      }
     }
 
-    setRows(Array.from(map.values()).slice(0, 200));
+    // cap pool so it doesn't grow forever
+    const all = Array.from(poolRef.current.values());
+    all.sort((a, b) => (b.__seenAt ?? 0) - (a.__seenAt ?? 0));
+    const capped = all.slice(0, 1200);
+
+    poolRef.current = new Map(capped.map((p) => [p.pairAddress.toLowerCase(), p]));
+    setRows(capped.slice(0, 400)); // render pool (manageable)
   }
 
   async function loadFromTokensEndpoint(addrs: string[]) {
+    // abort previous request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const joined = addrs.join(",");
     const res = await fetch(`https://api.dexscreener.com/tokens/v1/base/${joined}`, {
       cache: "no-store",
+      signal: controller.signal,
     });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     const data = (await res.json()) as DexPair[];
-    setRows(data || []);
+    setRows((data || []) as DexPairWithSeen[]);
   }
 
   async function loadData() {
@@ -203,6 +326,7 @@ export default function DashboardClient() {
 
       await loadFromSearch();
     } catch (e: any) {
+      if (e?.name === "AbortError") return;
       setRows([]);
       setErr(e?.message || "Failed to load data");
     } finally {
@@ -222,10 +346,17 @@ export default function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, autoSec, tab, tokenAddr]);
 
+  // if watchlist changes while on saved tab, refresh list
+  useEffect(() => {
+    if (tab === "saved") loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchTick]);
+
   // Text filter
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
+
     return rows.filter((r) => {
       const s = r.baseToken?.symbol?.toLowerCase() || "";
       const n = r.baseToken?.name?.toLowerCase() || "";
@@ -234,18 +365,23 @@ export default function DashboardClient() {
     });
   }, [rows, query]);
 
-  // Best pair per token (highest liq)
+  // Best pair per token (highest liq) — but when searching a token address, show ALL pairs
   const bestRows = useMemo(() => {
-    const map = new Map<string, DexPair>();
+    if (tokenAddr.trim()) return filtered;
+
+    const map = new Map<string, DexPairWithSeen>();
     for (const r of filtered) {
-      const key = r.baseToken.address.toLowerCase();
+      const key = (r.baseToken?.address || "").toLowerCase();
+      if (!key) continue;
+
       const cur = map.get(key);
       const liq = r.liquidity?.usd ?? 0;
       const curLiq = cur?.liquidity?.usd ?? -1;
+
       if (!cur || liq > curLiq) map.set(key, r);
     }
     return Array.from(map.values());
-  }, [filtered]);
+  }, [filtered, tokenAddr]);
 
   // Apply numeric filters
   const filteredByPanel = useMemo(() => {
@@ -263,24 +399,50 @@ export default function DashboardClient() {
     });
   }, [bestRows, minLiq, minVol, minTxns, onlyWithIcon]);
 
-  // Rank/sort
+  // TAB-SPECIFIC SORT
   const rankedRows = useMemo(() => {
     const arr = [...filteredByPanel];
 
     const txns24 = (p: DexPair) => (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
     const gain24 = (p: DexPair) => p.priceChange?.h24 ?? 0;
+    const created = (p: DexPairWithSeen) => normalizeTs(p.pairCreatedAt);
+    const seen = (p: DexPairWithSeen) => p.__seenAt ?? 0;
 
     arr.sort((a, b) => {
+      // NEW tab: newest pairs first; fallback to "seen time" if created missing
+      if (tab === "new") {
+        const cb = created(b);
+        const ca = created(a);
+
+        if (cb && ca) return cb - ca;
+        if (cb && !ca) return -1;
+        if (!cb && ca) return 1;
+        return seen(b) - seen(a);
+      }
+
+      // TOP tab: highest liquidity, then volume
+      if (tab === "top") {
+        const bl = b.liquidity?.usd ?? 0;
+        const al = a.liquidity?.usd ?? 0;
+        if (bl !== al) return bl - al;
+
+        const bv = b.volume?.h24 ?? 0;
+        const av = a.volume?.h24 ?? 0;
+        return bv - av;
+      }
+
+      // TRENDING tab: respect the "Rank by" dropdown
       if (rankBy === "trending") return trendingScore(b) - trendingScore(a);
       if (rankBy === "volume") return (b.volume?.h24 ?? 0) - (a.volume?.h24 ?? 0);
       if (rankBy === "txns") return txns24(b) - txns24(a);
       if (rankBy === "liquidity") return (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0);
       if (rankBy === "gainers") return gain24(b) - gain24(a);
+
       return 0;
     });
 
     return arr.slice(0, 120);
-  }, [filteredByPanel, rankBy]);
+  }, [filteredByPanel, rankBy, tab]);
 
   const totals = useMemo(() => {
     let vol = 0;
@@ -296,22 +458,47 @@ export default function DashboardClient() {
     loadData();
   }
 
-  // ✅ Ads disabled until you add REAL AdSense slot IDs
-  // When you have real IDs, put them here, e.g. "1234567890"
-  const AD_SLOT_TOP = "";
-  const AD_SLOT_BOTTOM = "";
+  // ✅ Put your REAL AdSense slot IDs here (from AdSense)
+  // Prefer env vars so you don't hardcode (works on Vercel too)
+  const AD_SLOT_TOP = process.env.NEXT_PUBLIC_AD_SLOT_TOP || "PUT_SLOT_ID_HERE";
+  const AD_SLOT_BOTTOM = process.env.NEXT_PUBLIC_AD_SLOT_BOTTOM || "PUT_SLOT_ID_HERE";
+
+  // ✅ Validate slots (prevents placeholder from rendering ads)
+  const topSlotOk = /^\d+$/.test(AD_SLOT_TOP);
+  const bottomSlotOk = /^\d+$/.test(AD_SLOT_BOTTOM);
+
+  // ✅ AdSense-safe gating (prevents “screens without publisher-content”)
+  const hasContent = rankedRows.length > 0;
+  const canShowAds = !filtersOpen && !loading && err === "" && hasContent;
+
+  // ✅ Optional: disable ads on localhost / vercel preview (avoids empty/no-fill + console spam)
+  const isDevHost =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname.endsWith(".vercel.app"));
+
+  const adsEnabled = canShowAds && !isDevHost;
 
   return (
-    <main className="min-h-screen text-white p-4 sm:p-8">
-      {/* ✅ Top Ad (only renders if slot exists) */}
-      <div className="mx-auto max-w-6xl">
-        {AD_SLOT_TOP && (
-          <AdUnit slot={AD_SLOT_TOP} className="glass ring-soft rounded-2xl p-3 mb-4" />
+    <main className="min-h-screen text-white py-6">
+      {/* ✅ Animated Toast */}
+      <div
+        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[1000] transition-all duration-300 ease-out
+        ${toast ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-3 scale-95 pointer-events-none"}`}
+      >
+        <div className="rounded-2xl bg-black/80 border border-white/15 px-5 py-2.5 text-sm text-white shadow-xl backdrop-blur">
+          {toast}
+        </div>
+      </div>
+
+      {/* ✅ Top Ad (ONLY when content is ready) */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        {topSlotOk && (
+          <AdUnit slot={AD_SLOT_TOP} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3 mb-4" />
         )}
       </div>
 
       {/* TOP STATS */}
-      <div className="mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">24H VOLUME</div>
           <div className="mt-1 text-2xl font-extrabold">{fmtUsd(totals.vol)}</div>
@@ -319,9 +506,7 @@ export default function DashboardClient() {
 
         <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">24H TXNS</div>
-          <div className="mt-1 text-2xl font-extrabold">
-            {Math.round(totals.txns).toLocaleString()}
-          </div>
+          <div className="mt-1 text-2xl font-extrabold">{Math.round(totals.txns).toLocaleString()}</div>
         </div>
 
         <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
@@ -331,9 +516,25 @@ export default function DashboardClient() {
         </div>
       </div>
 
+      {/* ✅ Publisher content (helps AdSense approval) */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
+        <section className="rounded-2xl bg-white/5 border border-white/10 p-5 text-sm text-white/70 leading-relaxed">
+          <h2 className="text-white font-semibold text-base mb-2">Base Token Dashboard</h2>
+          <p>
+            BaseScreener tracks real-time market activity for tokens on the Base network. Data shown here includes price,
+            24h volume, liquidity, and transaction counts to help you discover trending and newly listed tokens.
+          </p>
+          <p className="mt-2">
+            Use the tabs to switch between Trending, New, Top Liquidity, and your Saved watchlist. Filters let you narrow
+            results by minimum liquidity, volume, transactions, and whether a token has an icon.
+          </p>
+          <p className="mt-2 text-white/50">Disclaimer: This is informational only and not financial advice.</p>
+        </section>
+      </div>
+
       {/* ✅ HIGHLIGHTS */}
       {tokenAddr.trim() === "" && rankedRows.length >= 5 && (
-        <div className="mx-auto max-w-6xl mt-4">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
           <Highlights
             tokens={rankedRows.map((r) => ({
               symbol: r.baseToken?.symbol,
@@ -351,19 +552,19 @@ export default function DashboardClient() {
       )}
 
       {/* TOOLBAR */}
-      <div className="mx-auto max-w-6xl mt-4 rounded-2xl bg-white/5 border border-white/10 p-4">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4 rounded-2xl bg-white/5 border border-white/10 p-4">
         <div className="flex flex-col xl:flex-row gap-3 xl:items-center">
           {/* Address Search */}
-          <div className="flex flex-1 gap-2">
+          <div className="flex flex-1 gap-2 min-w-0">
             <input
               value={tokenAddr}
               onChange={(e) => setTokenAddr(e.target.value)}
               placeholder="Paste token address (0x...)"
-              className="flex-1 px-4 py-3 rounded-xl bg-black/40 border border-white/10 outline-none focus:border-blue-400"
+              className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-black/40 border border-white/10 outline-none focus:border-blue-400"
             />
             <button
               onClick={onGo}
-              className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition"
+              className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition shrink-0"
             >
               GO
             </button>
@@ -373,23 +574,21 @@ export default function DashboardClient() {
                 setQuery("");
                 loadData();
               }}
-              className="px-4 py-3 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition"
+              className="px-4 py-3 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition shrink-0"
               title="Reset"
             >
               ↻
             </button>
           </div>
 
-          {/* TF Buttons (kept) */}
+          {/* TF Buttons (visual only for now) */}
           <div className="flex gap-2 flex-wrap items-center">
             {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
               <button
                 key={k}
                 onClick={() => setTf(k)}
                 className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
-                  tf === k
-                    ? "bg-white text-[#020617] font-bold"
-                    : "bg-white/5 text-white/80 hover:bg-white/10"
+                  tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
                 }`}
               >
                 {k.toUpperCase()}
@@ -414,7 +613,19 @@ export default function DashboardClient() {
                   tab === k ? "bg-blue-600 font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
                 }`}
               >
-                {label}
+                <div className="flex items-center gap-2">
+                  <span>{label}</span>
+                  {k === "saved" && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[11px] border border-white/15 ${
+                        tab === "saved" ? "bg-white text-[#020617]" : "bg-white/10 text-white/80"
+                      }`}
+                      title="Saved tokens"
+                    >
+                      {savedCount}
+                    </span>
+                  )}
+                </div>
               </button>
             ))}
           </div>
@@ -442,10 +653,19 @@ export default function DashboardClient() {
               min={5}
             />
 
+            {/* Rank by only affects TRENDING tab */}
             <select
               value={rankBy}
               onChange={(e) => setRankBy(e.target.value as RankBy)}
               className="px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
+              disabled={tab === "new" || tab === "top"}
+              title={
+                tab === "new"
+                  ? "NEW tab sorts by newest pairs"
+                  : tab === "top"
+                  ? "TOP tab sorts by liquidity/volume"
+                  : ""
+              }
             >
               <option value="trending">Rank by: Trending</option>
               <option value="gainers">Rank by: Gainers (24h %)</option>
@@ -466,31 +686,20 @@ export default function DashboardClient() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter by symbol/name/address..."
-            className="w-full lg:w-[420px] px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+            className="w-full lg:w-[420px] min-w-0 px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
           />
         </div>
       </div>
 
-      {/* TABLE */}
-      <div className="mx-auto max-w-6xl mt-4 rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
-        <div className="min-w-[1280px]">
-          <div className="grid grid-cols-14 gap-0 px-4 py-3 text-xs font-bold text-white/70 border-b border-white/10">
-            <div>#</div>
-            <div className="col-span-3">TOKEN</div>
-            <div>PRICE</div>
-            <div>AGE</div>
-            <div>TXNS</div>
-            <div>VOLUME</div>
-            <div>LIQ</div>
-            <div>5M</div>
-            <div>1H</div>
-            <div>6H</div>
-            <div>24H</div>
-            <div>MCAP/FDV</div>
-          </div>
+      {/* LIST (Mobile cards) + TABLE (Desktop) */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
+        {/* ============ MOBILE CARDS ============ */}
+        <div className="md:hidden space-y-3">
+          {loading && (
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-4 text-white/70">Loading…</div>
+          )}
 
-          {loading && <div className="px-4 py-6 text-white/70">Loading…</div>}
-          {err && <div className="px-4 py-6 text-red-300">{err}</div>}
+          {err && <div className="rounded-2xl bg-white/5 border border-white/10 p-4 text-red-300">{err}</div>}
 
           {!loading &&
             !err &&
@@ -505,15 +714,13 @@ export default function DashboardClient() {
                 <div
                   key={`${addr}:${r.pairAddress}`}
                   onClick={() => router.push(`/token/${addr}`)}
-                  className="cursor-pointer grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
+                  className="cursor-pointer rounded-2xl bg-white/5 border border-white/10 p-4 hover:bg-white/10 transition"
                 >
-                  <div className="text-white/80 font-bold">{i + 1}</div>
-
-                  <div className="col-span-3 flex items-center gap-3 min-w-0">
-                    <div className="h-9 w-9 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-10 w-10 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
                       {r.info?.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={r.info.imageUrl} alt="" className="h-9 w-9 object-cover" loading="lazy" />
+                        <img src={r.info.imageUrl} alt="" className="h-10 w-10 object-cover" loading="lazy" />
                       ) : (
                         <span className="font-extrabold text-white">
                           {(r.baseToken?.symbol || "?").slice(0, 1).toUpperCase()}
@@ -521,53 +728,246 @@ export default function DashboardClient() {
                       )}
                     </div>
 
-                    <div className="min-w-0">
-                      <div className="font-bold truncate">{r.baseToken.symbol}</div>
-                      <div className="text-xs text-white/50 truncate">{r.baseToken.name}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-white truncate">
+                            #{i + 1} {r.baseToken.symbol}
+                          </div>
+                          <div className="text-xs text-white/50 truncate">{r.baseToken.name}</div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="font-extrabold text-white">{fmtPriceUsd(r.priceUsd)}</div>
+                          <div className="text-xs text-white/60">
+                            Age: <span className="font-bold text-white/80">{fmtAge(r.pairCreatedAt)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
+                          <div className="text-white/60">Txns 24h</div>
+                          <div className="font-bold text-white">
+                            {txns.toLocaleString()}{" "}
+                            <span className="text-white/40 font-normal">
+                              ({buys}/{sells})
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
+                          <div className="text-white/60">Volume 24h</div>
+                          <div className="font-bold text-white">{fmtUsd(r.volume?.h24)}</div>
+                        </div>
+
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
+                          <div className="text-white/60">Liquidity</div>
+                          <div className="font-bold text-white">{fmtUsd(r.liquidity?.usd)}</div>
+                        </div>
+
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
+                          <div className="text-white/60">24h Change</div>
+                          <div className="font-bold">{pctCell(pc.h24)}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
+                          <div className="text-white/50">5m</div>
+                          {pctCell(pc.m5)}
+                        </div>
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
+                          <div className="text-white/50">1h</div>
+                          {pctCell(pc.h1)}
+                        </div>
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
+                          <div className="text-white/50">6h</div>
+                          {pctCell(pc.h6)}
+                        </div>
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
+                          <div className="text-white/50">24h</div>
+                          {pctCell(pc.h24)}
+                        </div>
+                      </div>
+
+                      {/* Actions row */}
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <div className="text-xs text-white/60">
+                          FDV: <span className="text-white font-bold">{fmtUsd(r.fdv)}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!addr) return;
+                              const ok = await copyText(addr);
+                              showToast(ok ? "Copied! 📋" : "Copy failed");
+                            }}
+                            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
+                            title="Copy contract address"
+                          >
+                            📋 Copy
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const nowSaved = toggleSaved(addr);
+                              setWatchTick((x) => x + 1);
+                              showToast(nowSaved ? "Saved ⭐" : "Removed ❌");
+                            }}
+                            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
+                            title="Save to watchlist"
+                          >
+                            {isSaved(addr) ? "⭐ Saved" : "☆ Save"}
+                          </button>
+
+                          <a
+                            href={r.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
+                            title="Open on DexScreener"
+                          >
+                            ↗ Dex
+                          </a>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 text-[10px] text-white/35 break-all">Pair: {r.pairAddress}</div>
                     </div>
-                  </div>
-
-                  <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
-                  <div className="text-white/80 font-bold">{fmtAge(r.pairCreatedAt)}</div>
-
-                  <div className="text-white/80">
-                    <span className="font-bold">{txns.toLocaleString()}</span>
-                    <span className="text-xs text-white/40"> ({buys}/{sells})</span>
-                  </div>
-
-                  <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
-                  <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
-
-                  {pctCell(pc.m5)}
-                  {pctCell(pc.h1)}
-                  {pctCell(pc.h6)}
-                  {pctCell(pc.h24)}
-
-                  <div className="text-white/80 flex items-center gap-2">
-                    <span>{fmtUsd(r.fdv)}</span>
-
-                    <a
-                      href={r.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="ml-auto rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
-                      title="Open on DexScreener"
-                    >
-                      ↗
-                    </a>
                   </div>
                 </div>
               );
             })}
         </div>
+
+        {/* ============ DESKTOP TABLE ============ */}
+        <div className="hidden md:block rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
+          <div className="min-w-[1280px]">
+            <div className="grid grid-cols-14 gap-0 px-4 py-3 text-xs font-bold text-white/70 border-b border-white/10">
+              <div>#</div>
+              <div className="col-span-3">TOKEN</div>
+              <div>PRICE</div>
+              <div>AGE</div>
+              <div>TXNS</div>
+              <div>VOLUME</div>
+              <div>LIQ</div>
+              <div>5M</div>
+              <div>1H</div>
+              <div>6H</div>
+              <div>24H</div>
+              <div>MCAP/FDV</div>
+            </div>
+
+            {loading && <div className="px-4 py-6 text-white/70">Loading…</div>}
+            {err && <div className="px-4 py-6 text-red-300">{err}</div>}
+
+            {!loading &&
+              !err &&
+              rankedRows.map((r, i) => {
+                const buys = r.txns?.h24?.buys ?? 0;
+                const sells = r.txns?.h24?.sells ?? 0;
+                const txns = buys + sells;
+                const pc = r.priceChange || {};
+                const addr = (r.baseToken?.address || "").toLowerCase();
+
+                return (
+                  <div
+                    key={`${addr}:${r.pairAddress}`}
+                    onClick={() => router.push(`/token/${addr}`)}
+                    className="cursor-pointer grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
+                  >
+                    <div className="text-white/80 font-bold">{i + 1}</div>
+
+                    <div className="col-span-3 flex items-center gap-3 min-w-0">
+                      <div className="h-9 w-9 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
+                        {r.info?.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={r.info.imageUrl} alt="" className="h-9 w-9 object-cover" loading="lazy" />
+                        ) : (
+                          <span className="font-extrabold text-white">
+                            {(r.baseToken?.symbol || "?").slice(0, 1).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="font-bold truncate">{r.baseToken.symbol}</div>
+                        <div className="text-xs text-white/50 truncate">{r.baseToken.name}</div>
+                      </div>
+                    </div>
+
+                    <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
+                    <div className="text-white/80 font-bold">{fmtAge(r.pairCreatedAt)}</div>
+
+                    <div className="text-white/80">
+                      <span className="font-bold">{txns.toLocaleString()}</span>
+                      <span className="text-xs text-white/40"> ({buys}/{sells})</span>
+                    </div>
+
+                    <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
+                    <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
+
+                    {pctCell(pc.m5)}
+                    {pctCell(pc.h1)}
+                    {pctCell(pc.h6)}
+                    {pctCell(pc.h24)}
+
+                    {/* Actions */}
+                    <div className="text-white/80 flex items-center gap-2">
+                      <span className="whitespace-nowrap">{fmtUsd(r.fdv)}</span>
+
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!addr) return;
+                          const ok = await copyText(addr);
+                          showToast(ok ? "Copied! 📋" : "Copy failed");
+                        }}
+                        className="rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                        title="Copy contract address"
+                      >
+                        📋
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const nowSaved = toggleSaved(addr);
+                          setWatchTick((x) => x + 1);
+                          showToast(nowSaved ? "Saved ⭐" : "Removed ❌");
+                        }}
+                        className="rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                        title="Save to watchlist"
+                      >
+                        {isSaved(addr) ? "⭐" : "☆"}
+                      </button>
+
+                      <a
+                        href={r.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-auto rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                        title="Open on DexScreener"
+                      >
+                        ↗
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
       </div>
 
-      {/* ✅ Bottom Ad (only renders if slot exists) */}
-      <div className="mx-auto max-w-6xl mt-4">
-        {AD_SLOT_BOTTOM && (
-          <AdUnit slot={AD_SLOT_BOTTOM} className="glass ring-soft rounded-2xl p-3" />
-        )}
+      {/* ✅ Bottom Ad (ONLY when content is ready) */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
+        {bottomSlotOk && <AdUnit slot={AD_SLOT_BOTTOM} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3" />}
       </div>
 
       {/* FILTERS PANEL */}
@@ -625,11 +1025,7 @@ export default function DashboardClient() {
               </div>
 
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={onlyWithIcon}
-                  onChange={(e) => setOnlyWithIcon(e.target.checked)}
-                />
+                <input type="checkbox" checked={onlyWithIcon} onChange={(e) => setOnlyWithIcon(e.target.checked)} />
                 Only tokens with icon
               </label>
 
