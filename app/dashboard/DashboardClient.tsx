@@ -155,6 +155,92 @@ function pctCell(v?: number) {
   );
 }
 
+/** ===== Sparkline helpers (DexScreener search doesn't provide candles, so we synthesize) ===== */
+function toSparkFromChange(pc?: DexPair["priceChange"]): number[] {
+  const base = 100;
+  const clamp = (x: number) => Math.max(-50, Math.min(50, x));
+
+  const m5 = pc?.m5 ?? 0;
+  const h1 = pc?.h1 ?? 0;
+  const h6 = pc?.h6 ?? 0;
+  const h24 = pc?.h24 ?? 0;
+
+  const pts = [
+    base,
+    base * (1 + clamp(m5) / 100),
+    base * (1 + clamp(h1) / 100),
+    base * (1 + clamp(h6) / 100),
+    base * (1 + clamp(h24) / 100),
+  ];
+
+  const out: number[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    out.push(a, a * 0.85 + b * 0.15, a * 0.6 + b * 0.4, a * 0.35 + b * 0.65);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+function Sparkline({ data }: { data?: number[] }) {
+  const pts = (data || []).filter((x) => Number.isFinite(x));
+  if (pts.length < 2) return <div className="h-8 w-28" />;
+
+  const w = 120;
+  const h = 28;
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const range = max - min || 1;
+
+  const d = pts
+    .map((v, i) => {
+      const x = (i / (pts.length - 1)) * w;
+      const y = h - ((v - min) / range) * h;
+      return `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="h-8 w-28 text-green-400">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx={w} cy={h - ((pts[pts.length - 1] - min) / range) * h} r="3" className="fill-current" />
+    </svg>
+  );
+}
+
+function SocialsCell({ r }: { r: DexPair }) {
+  const info: any = (r as any).info;
+  const x = info?.socials?.find?.((s: any) => (s.type || "").toLowerCase() === "twitter")?.url;
+  const tg = info?.socials?.find?.((s: any) => (s.type || "").toLowerCase() === "telegram")?.url;
+  const web = info?.websites?.[0]?.url;
+
+  const links = [
+    x ? { label: "X", href: x } : null,
+    tg ? { label: "TG", href: tg } : null,
+    web ? { label: "WEB", href: web } : null,
+  ].filter(Boolean) as Array<{ label: string; href: string }>;
+
+  if (!links.length) return <span className="text-white/35">—</span>;
+
+  return (
+    <div className="flex items-center gap-2">
+      {links.slice(0, 3).map((l) => (
+        <a
+          key={l.href}
+          href={l.href}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10"
+        >
+          {l.label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export default function DashboardClient() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -445,8 +531,8 @@ export default function DashboardClient() {
     loadData();
   }
 
-  const AD_SLOT_TOP = process.env.NEXT_PUBLIC_AD_SLOT_TOP || "PUT_SLOT_ID_HERE";
-  const AD_SLOT_BOTTOM = process.env.NEXT_PUBLIC_AD_SLOT_BOTTOM || "PUT_SLOT_ID_HERE";
+  const AD_SLOT_TOP = process.env.NEXT_PUBLIC_AD_SLOT_TOP || "";
+  const AD_SLOT_BOTTOM = process.env.NEXT_PUBLIC_AD_SLOT_BOTTOM || "";
 
   const topSlotOk = /^\d+$/.test(AD_SLOT_TOP);
   const bottomSlotOk = /^\d+$/.test(AD_SLOT_BOTTOM);
@@ -473,25 +559,23 @@ export default function DashboardClient() {
       </div>
 
       {/* Top Ad */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        {topSlotOk && (
-          <AdUnit slot={AD_SLOT_TOP} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3 mb-4" />
-        )}
+      <div className="page-container">
+        {topSlotOk && <AdUnit slot={AD_SLOT_TOP} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3 mb-4" />}
       </div>
 
       {/* TOP STATS */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+      <div className="page-container grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="glass ring-soft rounded-2xl p-4">
           <div className="text-xs text-white/60">24H VOLUME</div>
           <div className="mt-1 text-2xl font-extrabold">{fmtUsd(totals.vol)}</div>
         </div>
 
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <div className="glass ring-soft rounded-2xl p-4">
           <div className="text-xs text-white/60">24H TXNS</div>
           <div className="mt-1 text-2xl font-extrabold">{Math.round(totals.txns).toLocaleString()}</div>
         </div>
 
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <div className="glass ring-soft rounded-2xl p-4">
           <div className="text-xs text-white/60">LATEST BLOCK</div>
           <div className="mt-1 text-2xl font-extrabold">—</div>
           <div className="text-xs text-white/40 mt-0.5">Not connected</div>
@@ -499,8 +583,8 @@ export default function DashboardClient() {
       </div>
 
       {/* Publisher content */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
-        <section className="rounded-2xl bg-white/5 border border-white/10 p-5 text-sm text-white/70 leading-relaxed">
+      <div className="page-container mt-4">
+        <section className="card-soft rounded-2xl p-5 text-sm text-white/70 leading-relaxed">
           <h2 className="text-white font-semibold text-base mb-2">Base Token Dashboard</h2>
           <p>
             BaseScreener tracks real-time market activity for tokens on the Base network. Data shown here includes price,
@@ -516,7 +600,7 @@ export default function DashboardClient() {
 
       {/* Highlights */}
       {tokenAddr.trim() === "" && rankedRows.length >= 5 && (
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
+        <div className="page-container mt-4">
           <Highlights
             tokens={rankedRows.map((r) => ({
               symbol: r.baseToken?.symbol,
@@ -534,313 +618,169 @@ export default function DashboardClient() {
       )}
 
       {/* TOOLBAR */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4 rounded-2xl bg-white/5 border border-white/10 p-4">
-        <div className="flex flex-col xl:flex-row gap-3 xl:items-center">
-          {/* Address Search */}
-          <div className="flex flex-1 gap-2 min-w-0">
-            <input
-              value={tokenAddr}
-              onChange={(e) => setTokenAddr(e.target.value)}
-              placeholder="Paste token address (0x...)"
-              className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-black/40 border border-white/10 outline-none focus:border-blue-400"
-            />
-            <button
-              onClick={onGo}
-              className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition shrink-0"
-            >
-              GO
-            </button>
-            <button
-              onClick={() => {
-                setTokenAddr("");
-                setQuery("");
-                loadData();
-              }}
-              className="px-4 py-3 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition shrink-0"
-              title="Reset"
-            >
-              ↻
-            </button>
-          </div>
-
-          {/* TF Buttons */}
-          <div className="flex gap-2 flex-wrap items-center">
-            {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
+      <div className="page-container mt-4">
+        <div className="glass ring-soft rounded-2xl p-4">
+          <div className="flex flex-col xl:flex-row gap-3 xl:items-center">
+            {/* Address Search */}
+            <div className="flex flex-1 gap-2 min-w-0">
+              <input
+                value={tokenAddr}
+                onChange={(e) => setTokenAddr(e.target.value)}
+                placeholder="Paste token address (0x...)"
+                className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-black/40 border border-white/10 outline-none focus:border-blue-400"
+              />
               <button
-                key={k}
-                onClick={() => setTf(k)}
-                className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
-                  tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
-                }`}
+                onClick={onGo}
+                className="px-5 py-3 rounded-xl bg-blue-600 font-bold hover:bg-blue-500 transition shrink-0"
               >
-                {k.toUpperCase()}
+                GO
               </button>
-            ))}
-          </div>
-
-          {/* Tabs */}
-          <div className="flex gap-2 flex-wrap items-center">
-            {(
-              [
-                ["trending", "🔥 TRENDING"],
-                ["new", "✨ NEW"],
-                ["top", "📈 TOP"],
-                ["saved", "🔖 SAVED"],
-              ] as Array<[Tab, string]>
-            ).map(([k, label]) => (
               <button
-                key={k}
-                onClick={() => setTab(k)}
-                className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
-                  tab === k ? "bg-blue-600 font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
-                }`}
+                onClick={() => {
+                  setTokenAddr("");
+                  setQuery("");
+                  loadData();
+                }}
+                className="px-4 py-3 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition shrink-0"
+                title="Reset"
               >
-                <div className="flex items-center gap-2">
-                  <span>{label}</span>
-
-                  {/* ✅ FIXED JSX + shows saved count */}
-                  {k === "saved" && (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[11px] border border-white/15 ${
-                        tab === "saved" ? "bg-white text-[#020617]" : "bg-white/10 text-white/80"
-                      }`}
-                      title="Saved tokens count"
-                    >
-                      {savedCount}
-                    </span>
-                  )}
-                </div>
+                ↻
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Secondary row */}
-        <div className="mt-3 flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="text-sm text-white/70">
-              AUTO: <span className="font-bold text-white">{auto ? `${autoSec}s` : "OFF"}</span>
             </div>
 
-            <button
-              onClick={() => setAuto(!auto)}
-              className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
-            >
-              Toggle Auto
-            </button>
+            {/* TF Buttons */}
+            <div className="flex gap-2 flex-wrap items-center">
+              {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
+                <button
+                  key={k}
+                  onClick={() => setTf(k)}
+                  className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
+                    tf === k ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
+                  }`}
+                >
+                  {k.toUpperCase()}
+                </button>
+              ))}
+            </div>
 
-            <input
-              type="number"
-              value={autoSec}
-              onChange={(e) => setAutoSec(Math.max(5, Number(e.target.value) || 12))}
-              className="w-24 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
-              min={5}
-            />
-
-            <select
-              value={rankBy}
-              onChange={(e) => setRankBy(e.target.value as RankBy)}
-              className="px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
-              disabled={tab === "new" || tab === "top"}
-            >
-              <option value="trending">Rank by: Trending</option>
-              <option value="gainers">Rank by: Gainers (24h %)</option>
-              <option value="volume">Rank by: Volume</option>
-              <option value="txns">Rank by: Txns</option>
-              <option value="liquidity">Rank by: Liquidity</option>
-            </select>
-
-            <button
-              onClick={() => setFiltersOpen(true)}
-              className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
-            >
-              ☰ Filters
-            </button>
+            {/* Tabs */}
+            <div className="flex gap-2 flex-wrap items-center">
+              {(
+                [
+                  ["trending", "🔥 TRENDING"],
+                  ["new", "✨ NEW"],
+                  ["top", "📈 TOP"],
+                  ["saved", "🔖 SAVED"],
+                ] as Array<[Tab, string]>
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setTab(k)}
+                  className={`px-4 py-3 rounded-xl border border-white/10 text-sm ${
+                    tab === k ? "bg-blue-600 font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span>{label}</span>
+                    {k === "saved" && (
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[11px] border border-white/15 ${
+                          tab === "saved" ? "bg-white text-[#020617]" : "bg-white/10 text-white/80"
+                        }`}
+                        title="Saved tokens count"
+                      >
+                        {savedCount}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
 
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by symbol/name/address..."
-            className="w-full lg:w-[420px] min-w-0 px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
-          />
+          {/* Secondary row */}
+          <div className="mt-3 flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="text-sm text-white/70">
+                AUTO: <span className="font-bold text-white">{auto ? `${autoSec}s` : "OFF"}</span>
+              </div>
+
+              <button
+                onClick={() => setAuto(!auto)}
+                className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
+              >
+                Toggle Auto
+              </button>
+
+              <input
+                type="number"
+                value={autoSec}
+                onChange={(e) => setAutoSec(Math.max(5, Number(e.target.value) || 12))}
+                className="w-24 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
+                min={5}
+              />
+
+              <select
+                value={rankBy}
+                onChange={(e) => setRankBy(e.target.value as RankBy)}
+                className="px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
+                disabled={tab === "new" || tab === "top"}
+              >
+                <option value="trending">Rank by: Trending</option>
+                <option value="gainers">Rank by: Gainers (24h %)</option>
+                <option value="volume">Rank by: Volume</option>
+                <option value="txns">Rank by: Txns</option>
+                <option value="liquidity">Rank by: Liquidity</option>
+              </select>
+
+              <button
+                onClick={() => setFiltersOpen(true)}
+                className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm"
+              >
+                ☰ Filters
+              </button>
+            </div>
+
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter by symbol/name/address..."
+              className="w-full lg:w-[420px] min-w-0 px-4 py-2 rounded-xl bg-black/40 border border-white/10 outline-none"
+            />
+          </div>
         </div>
       </div>
 
       {/* LIST (Mobile cards) + TABLE (Desktop) */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
+      <div className="page-container mt-4">
         {/* MOBILE */}
         <div className="md:hidden space-y-3">
-          {loading && (
-            <div className="rounded-2xl bg-white/5 border border-white/10 p-4 text-white/70">Loading…</div>
-          )}
-          {err && <div className="rounded-2xl bg-white/5 border border-white/10 p-4 text-red-300">{err}</div>}
+          {loading && <div className="glass ring-soft rounded-2xl p-4 text-white/70">Loading…</div>}
+          {err && <div className="glass ring-soft rounded-2xl p-4 text-red-300">{err}</div>}
 
           {!loading &&
             !err &&
             rankedRows.map((r, i) => {
-              const buys = r.txns?.h24?.buys ?? 0;
-              const sells = r.txns?.h24?.sells ?? 0;
-              const txns = buys + sells;
-              const pc = r.priceChange || {};
               const addr = (r.baseToken?.address || "").toLowerCase();
+              const marketCap = r.fdv ?? undefined;
+              const h24 = r.priceChange?.h24;
+              const marketCapDelta =
+                typeof h24 === "number" && Number.isFinite(marketCap || NaN) ? ((marketCap as number) * h24) / 100 : undefined;
+              const spark = toSparkFromChange(r.priceChange);
 
               return (
                 <div
                   key={`${addr}:${r.pairAddress}`}
                   onClick={() => router.push(`/token/${addr}`)}
-                  className="cursor-pointer rounded-2xl bg-white/5 border border-white/10 p-4 hover:bg-white/10 transition"
+                  className="cursor-pointer glass ring-soft rounded-2xl p-4 hover:bg-white/10 transition"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-10 w-10 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
-                      {r.info?.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={r.info.imageUrl} alt="" className="h-10 w-10 object-cover" loading="lazy" />
-                      ) : (
-                        <span className="font-extrabold text-white">
-                          {(r.baseToken?.symbol || "?").slice(0, 1).toUpperCase()}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-extrabold text-white truncate">
-                            #{i + 1} {r.baseToken.symbol}
-                          </div>
-                          <div className="text-xs text-white/50 truncate">{r.baseToken.name}</div>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <div className="font-extrabold text-white">{fmtPriceUsd(r.priceUsd)}</div>
-                          <div className="text-xs text-white/60">
-                            Age: <span className="font-bold text-white/80">{fmtAge(r.pairCreatedAt)}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
-                          <div className="text-white/60">Txns 24h</div>
-                          <div className="font-bold text-white">
-                            {txns.toLocaleString()}{" "}
-                            <span className="text-white/40 font-normal">({buys}/{sells})</span>
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
-                          <div className="text-white/60">Volume 24h</div>
-                          <div className="font-bold text-white">{fmtUsd(r.volume?.h24)}</div>
-                        </div>
-
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
-                          <div className="text-white/60">Liquidity</div>
-                          <div className="font-bold text-white">{fmtUsd(r.liquidity?.usd)}</div>
-                        </div>
-
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2">
-                          <div className="text-white/60">24h Change</div>
-                          <div className="font-bold">{pctCell(pc.h24)}</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <div className="text-xs text-white/60">
-                          FDV: <span className="text-white font-bold">{fmtUsd(r.fdv)}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (!addr) return;
-                              const ok = await copyText(addr);
-                              showToast(ok ? "Copied! 📋" : "Copy failed");
-                            }}
-                            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
-                            title="Copy contract address"
-                          >
-                            📋 Copy
-                          </button>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const nowSaved = toggleSaved(addr);
-                              setWatchTick((x) => x + 1);
-                              showToast(nowSaved ? "Saved ⭐" : "Removed ❌");
-                            }}
-                            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
-                            title="Save to watchlist"
-                          >
-                            {isSaved(addr) ? "⭐ Saved" : "☆ Save"}
-                          </button>
-
-                          <a
-                            href={r.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
-                            title="Open on DexScreener"
-                          >
-                            ↗ Dex
-                          </a>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 text-[10px] text-white/35 break-all">Pair: {r.pairAddress}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-        </div>
-
-        {/* DESKTOP */}
-        <div className="hidden md:block rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
-          <div className="min-w-[1280px]">
-            <div className="grid grid-cols-14 gap-0 px-4 py-3 text-xs font-bold text-white/70 border-b border-white/10">
-              <div>#</div>
-              <div className="col-span-3">TOKEN</div>
-              <div>PRICE</div>
-              <div>AGE</div>
-              <div>TXNS</div>
-              <div>VOLUME</div>
-              <div>LIQ</div>
-              <div>5M</div>
-              <div>1H</div>
-              <div>6H</div>
-              <div>24H</div>
-              <div>MCAP/FDV</div>
-            </div>
-
-            {loading && <div className="px-4 py-6 text-white/70">Loading…</div>}
-            {err && <div className="px-4 py-6 text-red-300">{err}</div>}
-
-            {!loading &&
-              !err &&
-              rankedRows.map((r, i) => {
-                const buys = r.txns?.h24?.buys ?? 0;
-                const sells = r.txns?.h24?.sells ?? 0;
-                const txns = buys + sells;
-                const pc = r.priceChange || {};
-                const addr = (r.baseToken?.address || "").toLowerCase();
-
-                return (
-                  <div
-                    key={`${addr}:${r.pairAddress}`}
-                    onClick={() => router.push(`/token/${addr}`)}
-                    className="cursor-pointer grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
-                  >
-                    <div className="text-white/80 font-bold">{i + 1}</div>
-
-                    <div className="col-span-3 flex items-center gap-3 min-w-0">
-                      <div className="h-9 w-9 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
+                  {/* Row 1: token + market cap */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-10 w-10 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
                         {r.info?.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={r.info.imageUrl} alt="" className="h-9 w-9 object-cover" loading="lazy" />
+                          <img src={r.info.imageUrl} alt="" className="h-10 w-10 object-cover" loading="lazy" />
                         ) : (
                           <span className="font-extrabold text-white">
                             {(r.baseToken?.symbol || "?").slice(0, 1).toUpperCase()}
@@ -849,30 +789,60 @@ export default function DashboardClient() {
                       </div>
 
                       <div className="min-w-0">
-                        <div className="font-bold truncate">{r.baseToken.symbol}</div>
-                        <div className="text-xs text-white/50 truncate">{r.baseToken.name}</div>
+                        <div className="font-extrabold text-white truncate">
+                          #{i + 1} {r.baseToken?.symbol || "—"}
+                        </div>
+                        <div className="text-xs text-white/50 truncate">{r.baseToken?.name || "—"}</div>
                       </div>
                     </div>
 
-                    <div className="font-bold">{fmtPriceUsd(r.priceUsd)}</div>
-                    <div className="text-white/80 font-bold">{fmtAge(r.pairCreatedAt)}</div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[11px] text-white/50">Market Cap</div>
+                      <div className={typeof h24 === "number" && h24 > 0 ? "text-green-400 font-extrabold" : "text-white font-extrabold"}>
+                        {fmtUsd(marketCap)}
+                      </div>
 
-                    <div className="text-white/80">
-                      <span className="font-bold">{txns.toLocaleString()}</span>
-                      <span className="text-xs text-white/40"> ({buys}/{sells})</span>
+                      {typeof marketCapDelta === "number" && marketCapDelta > 0 ? (
+                        <div className="text-green-400 text-xs font-bold">▲ {fmtUsd(marketCapDelta)}</div>
+                      ) : (
+                        <div className="text-white/30 text-xs">&nbsp;</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 2: volume + age */}
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-xl bg-white/5 border border-white/10 p-2">
+                      <div className="text-white/60">24h Vol</div>
+                      <div className="font-bold text-white">{fmtUsd(r.volume?.h24)}</div>
                     </div>
 
-                    <div className="font-bold">{fmtUsd(r.volume?.h24)}</div>
-                    <div className="font-bold">{fmtUsd(r.liquidity?.usd)}</div>
+                    <div className="rounded-xl bg-white/5 border border-white/10 p-2">
+                      <div className="text-white/60">Age</div>
+                      <div className="font-bold text-white">{fmtAge(r.pairCreatedAt)}</div>
+                    </div>
+                  </div>
 
-                    {pctCell(pc.m5)}
-                    {pctCell(pc.h1)}
-                    {pctCell(pc.h6)}
-                    {pctCell(pc.h24)}
+                  {/* Row 3: socials + sparkline */}
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs text-white/60 mb-1">Socials</div>
+                      <SocialsCell r={r} />
+                    </div>
 
-                    <div className="text-white/80 flex items-center gap-2">
-                      <span className="whitespace-nowrap">{fmtUsd(r.fdv)}</span>
+                    <div className="shrink-0">
+                      <div className="text-xs text-white/60 mb-1 text-right">Past 24 hours</div>
+                      <div className="flex justify-end">
+                        <Sparkline data={spark} />
+                      </div>
+                    </div>
+                  </div>
 
+                  {/* Actions */}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="text-[10px] text-white/35 break-all truncate">{addr}</div>
+
+                    <div className="flex items-center gap-2">
                       <button
                         onClick={async (e) => {
                           e.stopPropagation();
@@ -880,7 +850,7 @@ export default function DashboardClient() {
                           const ok = await copyText(addr);
                           showToast(ok ? "Copied! 📋" : "Copy failed");
                         }}
-                        className="rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                        className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
                         title="Copy contract address"
                       >
                         📋
@@ -893,7 +863,7 @@ export default function DashboardClient() {
                           setWatchTick((x) => x + 1);
                           showToast(nowSaved ? "Saved ⭐" : "Removed ❌");
                         }}
-                        className="rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                        className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
                         title="Save to watchlist"
                       >
                         {isSaved(addr) ? "⭐" : "☆"}
@@ -904,11 +874,93 @@ export default function DashboardClient() {
                         target="_blank"
                         rel="noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="ml-auto rounded-lg bg-white/10 border border-white/10 px-2 py-1 text-xs hover:bg-white/15 transition"
+                        className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs hover:bg-white/15 transition"
                         title="Open on DexScreener"
                       >
                         ↗
                       </a>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+
+        {/* DESKTOP */}
+        <div className="hidden md:block glass ring-soft rounded-2xl overflow-x-auto">
+          <div className="min-w-[1120px]">
+            {/* Header: add Name before Market Cap (fix alignment) */}
+            <div className="grid grid-cols-[1.3fr_.8fr_.8fr_.5fr_1fr_1.1fr] gap-4 px-4 py-3 text-xs font-bold text-white/60 border-b border-white/10">
+              <div>Name</div>
+              <div>Market Cap</div>
+              <div>24h Vol</div>
+              <div>Age</div>
+              <div>Socials</div>
+              <div className="justify-self-end">Past 24 hours</div>
+            </div>
+
+            {loading && <div className="px-4 py-6 text-white/70">Loading…</div>}
+            {err && <div className="px-4 py-6 text-red-300">{err}</div>}
+
+            {!loading &&
+              !err &&
+              rankedRows.map((r) => {
+                const addr = (r.baseToken?.address || "").toLowerCase();
+                const marketCap = r.fdv ?? undefined; // proxy
+                const h24 = r.priceChange?.h24;
+                const marketCapDelta =
+                  typeof h24 === "number" && Number.isFinite(marketCap || NaN) ? ((marketCap as number) * h24) / 100 : undefined;
+                const spark = toSparkFromChange(r.priceChange);
+
+                return (
+                  <div
+                    key={`${addr}:${r.pairAddress}`}
+                    onClick={() => router.push(`/token/${addr}`)}
+                    className="cursor-pointer grid grid-cols-[1.3fr_.8fr_.8fr_.5fr_1fr_1.1fr] items-center gap-4 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition"
+                  >
+                    {/* NAME (icon + symbol + full name) */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-9 w-9 shrink-0 rounded-xl bg-white/10 border border-white/10 overflow-hidden flex items-center justify-center">
+                        {r.info?.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={r.info.imageUrl} alt="" className="h-9 w-9 object-cover" loading="lazy" />
+                        ) : (
+                          <span className="font-extrabold text-white">{(r.baseToken?.symbol || "?")[0]}</span>
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-white truncate">{r.baseToken?.symbol || "—"}</div>
+                        <div className="text-xs text-white/50 truncate">{r.baseToken?.name || "—"}</div>
+                      </div>
+                    </div>
+
+                    {/* MARKET CAP (green only when 24h change is positive) */}
+                    <div className="flex flex-col items-start">
+                      <div className={typeof h24 === "number" && h24 > 0 ? "text-green-400 font-semibold" : "text-white font-semibold"}>
+                        {fmtUsd(marketCap)}
+                      </div>
+                      {typeof marketCapDelta === "number" && marketCapDelta > 0 ? (
+                        <div className="text-green-400 text-xs font-bold">▲ {fmtUsd(marketCapDelta)}</div>
+                      ) : (
+                        <div className="text-white/30 text-xs">&nbsp;</div>
+                      )}
+                    </div>
+
+                    {/* 24h Volume */}
+                    <div className="text-white font-semibold">{fmtUsd(r.volume?.h24)}</div>
+
+                    {/* Age */}
+                    <div className="text-white/70 font-semibold">{fmtAge(r.pairCreatedAt)}</div>
+
+                    {/* Socials */}
+                    <div>
+                      <SocialsCell r={r} />
+                    </div>
+
+                    {/* Sparkline */}
+                    <div className="justify-self-end">
+                      <Sparkline data={spark} />
                     </div>
                   </div>
                 );
@@ -918,28 +970,19 @@ export default function DashboardClient() {
       </div>
 
       {/* Bottom Ad */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
-        {bottomSlotOk && (
-          <AdUnit slot={AD_SLOT_BOTTOM} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3" />
-        )}
+      <div className="page-container mt-4">
+        {bottomSlotOk && <AdUnit slot={AD_SLOT_BOTTOM} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3" />}
       </div>
 
       {/* FILTERS PANEL */}
       {filtersOpen && (
         <div className="fixed inset-0 z-[999]">
-          <button
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setFiltersOpen(false)}
-            aria-label="Close filters"
-          />
+          <button className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} aria-label="Close filters" />
 
           <div className="absolute right-0 top-0 h-full w-full max-w-md bg-[#0b1220] border-l border-white/10 p-5 text-white">
             <div className="flex items-center justify-between">
               <div className="text-lg font-extrabold">Filters</div>
-              <button
-                onClick={() => setFiltersOpen(false)}
-                className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
-              >
+              <button onClick={() => setFiltersOpen(false)} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15">
                 ✕
               </button>
             </div>
