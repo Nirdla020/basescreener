@@ -104,7 +104,7 @@ function toggleSaved(addr?: string) {
 
   const next = exists ? cur.filter((x) => x !== a) : [a, ...cur];
   writeSaved(next);
-  return !exists; // true if now saved
+  return !exists;
 }
 
 async function copyText(text: string) {
@@ -160,7 +160,7 @@ export default function DashboardClient() {
   const router = useRouter();
 
   const [tab, setTab] = useState<Tab>("trending");
-  const [tf, setTf] = useState<TF>("24h"); // visual only for now
+  const [tf, setTf] = useState<TF>("24h");
   const [rankBy, setRankBy] = useState<RankBy>("trending");
 
   const [auto, setAuto] = useState(true);
@@ -173,17 +173,13 @@ export default function DashboardClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // Filters panel
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [minLiq, setMinLiq] = useState<number>(0);
   const [minVol, setMinVol] = useState<number>(0);
   const [minTxns, setMinTxns] = useState<number>(0);
   const [onlyWithIcon, setOnlyWithIcon] = useState(false);
 
-  // watchlist rerender tick
   const [watchTick, setWatchTick] = useState(0);
-
-  // toast
   const [toast, setToast] = useState<string>("");
 
   function showToast(msg: string) {
@@ -194,7 +190,6 @@ export default function DashboardClient() {
 
   const savedCount = useMemo(() => readSaved().length, [watchTick]);
 
-  // discovery pool + abort (prevents request races)
   const poolRef = useRef<Map<string, DexPairWithSeen>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
 
@@ -203,7 +198,6 @@ export default function DashboardClient() {
     if (qp) setQuery(qp);
   }, [sp]);
 
-  // when switching tabs, clear address search (so it doesn't "lock" the list)
   useEffect(() => {
     setTokenAddr("");
   }, [tab]);
@@ -235,11 +229,13 @@ export default function DashboardClient() {
     ];
 
     const rotate = Math.floor(Date.now() / 60_000) % NEW_DISCOVERY_QUERIES.length;
-    const rotatedNew = [...NEW_DISCOVERY_QUERIES.slice(rotate), ...NEW_DISCOVERY_QUERIES.slice(0, rotate)].slice(0, 6);
+    const rotatedNew = [...NEW_DISCOVERY_QUERIES.slice(rotate), ...NEW_DISCOVERY_QUERIES.slice(0, rotate)].slice(
+      0,
+      6
+    );
 
     const queries = [...TRENDING_QUERIES, ...rotatedNew];
 
-    // abort previous request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -259,7 +255,6 @@ export default function DashboardClient() {
     const now = Date.now();
     const pairs = results.flat().filter((p) => (p.chainId || "").toLowerCase() === "base");
 
-    // accumulate into pool (dedup by pairAddress; keep better liquidity)
     for (const p of pairs) {
       const key = (p.pairAddress || "").toLowerCase();
       if (!key) continue;
@@ -268,24 +263,19 @@ export default function DashboardClient() {
       const liq = p.liquidity?.usd ?? 0;
       const curLiq = cur?.liquidity?.usd ?? -1;
 
-      if (!cur) {
-        poolRef.current.set(key, { ...p, __seenAt: now });
-      } else if (liq > curLiq) {
-        poolRef.current.set(key, { ...p, __seenAt: cur.__seenAt ?? now });
-      }
+      if (!cur) poolRef.current.set(key, { ...p, __seenAt: now });
+      else if (liq > curLiq) poolRef.current.set(key, { ...p, __seenAt: cur.__seenAt ?? now });
     }
 
-    // cap pool so it doesn't grow forever
     const all = Array.from(poolRef.current.values());
     all.sort((a, b) => (b.__seenAt ?? 0) - (a.__seenAt ?? 0));
     const capped = all.slice(0, 1200);
 
     poolRef.current = new Map(capped.map((p) => [p.pairAddress.toLowerCase(), p]));
-    setRows(capped.slice(0, 400)); // render pool (manageable)
+    setRows(capped.slice(0, 400));
   }
 
   async function loadFromTokensEndpoint(addrs: string[]) {
-    // abort previous request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -317,7 +307,7 @@ export default function DashboardClient() {
         const saved = readSaved().slice(0, 30).map((x) => x.toLowerCase());
         if (saved.length === 0) {
           setRows([]);
-          setErr("No saved tokens yet. Add to watchlist (localStorage).");
+          setErr("No saved tokens yet. Add to watchlist (saved locally).");
           return;
         }
         await loadFromTokensEndpoint(saved);
@@ -346,26 +336,23 @@ export default function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, autoSec, tab, tokenAddr]);
 
-  // if watchlist changes while on saved tab, refresh list
   useEffect(() => {
     if (tab === "saved") loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchTick]);
 
-  // Text filter
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
+    const q2 = query.trim().toLowerCase();
+    if (!q2) return rows;
 
     return rows.filter((r) => {
       const s = r.baseToken?.symbol?.toLowerCase() || "";
       const n = r.baseToken?.name?.toLowerCase() || "";
       const a = r.baseToken?.address?.toLowerCase() || "";
-      return s.includes(q) || n.includes(q) || a.includes(q);
+      return s.includes(q2) || n.includes(q2) || a.includes(q2);
     });
   }, [rows, query]);
 
-  // Best pair per token (highest liq) — but when searching a token address, show ALL pairs
   const bestRows = useMemo(() => {
     if (tokenAddr.trim()) return filtered;
 
@@ -383,7 +370,6 @@ export default function DashboardClient() {
     return Array.from(map.values());
   }, [filtered, tokenAddr]);
 
-  // Apply numeric filters
   const filteredByPanel = useMemo(() => {
     return bestRows.filter((r) => {
       const liq = r.liquidity?.usd ?? 0;
@@ -399,7 +385,6 @@ export default function DashboardClient() {
     });
   }, [bestRows, minLiq, minVol, minTxns, onlyWithIcon]);
 
-  // TAB-SPECIFIC SORT
   const rankedRows = useMemo(() => {
     const arr = [...filteredByPanel];
 
@@ -409,7 +394,6 @@ export default function DashboardClient() {
     const seen = (p: DexPairWithSeen) => p.__seenAt ?? 0;
 
     arr.sort((a, b) => {
-      // NEW tab: newest pairs first; fallback to "seen time" if created missing
       if (tab === "new") {
         const cb = created(b);
         const ca = created(a);
@@ -420,7 +404,6 @@ export default function DashboardClient() {
         return seen(b) - seen(a);
       }
 
-      // TOP tab: highest liquidity, then volume
       if (tab === "top") {
         const bl = b.liquidity?.usd ?? 0;
         const al = a.liquidity?.usd ?? 0;
@@ -431,7 +414,6 @@ export default function DashboardClient() {
         return bv - av;
       }
 
-      // TRENDING tab: respect the "Rank by" dropdown
       if (rankBy === "trending") return trendingScore(b) - trendingScore(a);
       if (rankBy === "volume") return (b.volume?.h24 ?? 0) - (a.volume?.h24 ?? 0);
       if (rankBy === "txns") return txns24(b) - txns24(a);
@@ -458,20 +440,15 @@ export default function DashboardClient() {
     loadData();
   }
 
-  // ✅ Put your REAL AdSense slot IDs here (from AdSense)
-  // Prefer env vars so you don't hardcode (works on Vercel too)
   const AD_SLOT_TOP = process.env.NEXT_PUBLIC_AD_SLOT_TOP || "PUT_SLOT_ID_HERE";
   const AD_SLOT_BOTTOM = process.env.NEXT_PUBLIC_AD_SLOT_BOTTOM || "PUT_SLOT_ID_HERE";
 
-  // ✅ Validate slots (prevents placeholder from rendering ads)
   const topSlotOk = /^\d+$/.test(AD_SLOT_TOP);
   const bottomSlotOk = /^\d+$/.test(AD_SLOT_BOTTOM);
 
-  // ✅ AdSense-safe gating (prevents “screens without publisher-content”)
   const hasContent = rankedRows.length > 0;
   const canShowAds = !filtersOpen && !loading && err === "" && hasContent;
 
-  // ✅ Optional: disable ads on localhost / vercel preview (avoids empty/no-fill + console spam)
   const isDevHost =
     typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname.endsWith(".vercel.app"));
@@ -480,7 +457,7 @@ export default function DashboardClient() {
 
   return (
     <main className="min-h-screen text-white py-6">
-      {/* ✅ Animated Toast */}
+      {/* Toast */}
       <div
         className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[1000] transition-all duration-300 ease-out
         ${toast ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-3 scale-95 pointer-events-none"}`}
@@ -490,7 +467,7 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* ✅ Top Ad (ONLY when content is ready) */}
+      {/* Top Ad */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         {topSlotOk && (
           <AdUnit slot={AD_SLOT_TOP} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3 mb-4" />
@@ -516,7 +493,7 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* ✅ Publisher content (helps AdSense approval) */}
+      {/* Publisher content */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
         <section className="rounded-2xl bg-white/5 border border-white/10 p-5 text-sm text-white/70 leading-relaxed">
           <h2 className="text-white font-semibold text-base mb-2">Base Token Dashboard</h2>
@@ -532,7 +509,7 @@ export default function DashboardClient() {
         </section>
       </div>
 
-      {/* ✅ HIGHLIGHTS */}
+      {/* Highlights */}
       {tokenAddr.trim() === "" && rankedRows.length >= 5 && (
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
           <Highlights
@@ -581,7 +558,7 @@ export default function DashboardClient() {
             </button>
           </div>
 
-          {/* TF Buttons (visual only for now) */}
+          {/* TF Buttons */}
           <div className="flex gap-2 flex-wrap items-center">
             {(["5m", "1h", "6h", "24h"] as TF[]).map((k) => (
               <button
@@ -618,13 +595,14 @@ export default function DashboardClient() {
                   {k === "saved" && (
                     <span
                       className={`px-2 py-0.5 rounded-full text-[11px] border border-white/15 ${
-                        tab === "saved" ? "bg-white text-[#020617]" : "bg-white/10 text-white/80"
+                        tab === "saved"
+                          ? "bg-white text-[#020617]"
+                          : "bg-white/10 text-white/80"
                       }`}
-                      title="Saved tokens"
-                    >
-                      {savedCount}
-                    </span>
-                  )}
+                     >
+                       Saved
+                     </span>
+                    )}
                 </div>
               </button>
             ))}
@@ -653,19 +631,11 @@ export default function DashboardClient() {
               min={5}
             />
 
-            {/* Rank by only affects TRENDING tab */}
             <select
               value={rankBy}
               onChange={(e) => setRankBy(e.target.value as RankBy)}
               className="px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-sm"
               disabled={tab === "new" || tab === "top"}
-              title={
-                tab === "new"
-                  ? "NEW tab sorts by newest pairs"
-                  : tab === "top"
-                  ? "TOP tab sorts by liquidity/volume"
-                  : ""
-              }
             >
               <option value="trending">Rank by: Trending</option>
               <option value="gainers">Rank by: Gainers (24h %)</option>
@@ -693,12 +663,11 @@ export default function DashboardClient() {
 
       {/* LIST (Mobile cards) + TABLE (Desktop) */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
-        {/* ============ MOBILE CARDS ============ */}
+        {/* MOBILE */}
         <div className="md:hidden space-y-3">
           {loading && (
             <div className="rounded-2xl bg-white/5 border border-white/10 p-4 text-white/70">Loading…</div>
           )}
-
           {err && <div className="rounded-2xl bg-white/5 border border-white/10 p-4 text-red-300">{err}</div>}
 
           {!loading &&
@@ -713,7 +682,12 @@ export default function DashboardClient() {
               return (
                 <div
                   key={`${addr}:${r.pairAddress}`}
-                  onClick={() => router.push(`/token/${addr}`)}
+                  onClick={() =>
+                    router.push({
+                      pathname: "/token/[address]",
+                      params: { address: addr },
+                    } as any)
+                  }
                   className="cursor-pointer rounded-2xl bg-white/5 border border-white/10 p-4 hover:bg-white/10 transition"
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -750,9 +724,7 @@ export default function DashboardClient() {
                           <div className="text-white/60">Txns 24h</div>
                           <div className="font-bold text-white">
                             {txns.toLocaleString()}{" "}
-                            <span className="text-white/40 font-normal">
-                              ({buys}/{sells})
-                            </span>
+                            <span className="text-white/40 font-normal">({buys}/{sells})</span>
                           </div>
                         </div>
 
@@ -772,26 +744,6 @@ export default function DashboardClient() {
                         </div>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
-                          <div className="text-white/50">5m</div>
-                          {pctCell(pc.m5)}
-                        </div>
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
-                          <div className="text-white/50">1h</div>
-                          {pctCell(pc.h1)}
-                        </div>
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
-                          <div className="text-white/50">6h</div>
-                          {pctCell(pc.h6)}
-                        </div>
-                        <div className="rounded-xl bg-white/5 border border-white/10 p-2 text-center">
-                          <div className="text-white/50">24h</div>
-                          {pctCell(pc.h24)}
-                        </div>
-                      </div>
-
-                      {/* Actions row */}
                       <div className="mt-3 flex items-center justify-between gap-2">
                         <div className="text-xs text-white/60">
                           FDV: <span className="text-white font-bold">{fmtUsd(r.fdv)}</span>
@@ -845,7 +797,7 @@ export default function DashboardClient() {
             })}
         </div>
 
-        {/* ============ DESKTOP TABLE ============ */}
+        {/* DESKTOP */}
         <div className="hidden md:block rounded-2xl bg-white/5 border border-white/10 overflow-x-auto">
           <div className="min-w-[1280px]">
             <div className="grid grid-cols-14 gap-0 px-4 py-3 text-xs font-bold text-white/70 border-b border-white/10">
@@ -878,7 +830,12 @@ export default function DashboardClient() {
                 return (
                   <div
                     key={`${addr}:${r.pairAddress}`}
-                    onClick={() => router.push(`/token/${addr}`)}
+                    onClick={() =>
+                      router.push({
+                        pathname: "/token/[address]",
+                        params: { address: addr },
+                      } as any)
+                    }
                     className="cursor-pointer grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
                   >
                     <div className="text-white/80 font-bold">{i + 1}</div>
@@ -917,7 +874,6 @@ export default function DashboardClient() {
                     {pctCell(pc.h6)}
                     {pctCell(pc.h24)}
 
-                    {/* Actions */}
                     <div className="text-white/80 flex items-center gap-2">
                       <span className="whitespace-nowrap">{fmtUsd(r.fdv)}</span>
 
@@ -965,27 +921,22 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* ✅ Bottom Ad (ONLY when content is ready) */}
+      {/* Bottom Ad */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-4">
-        {bottomSlotOk && <AdUnit slot={AD_SLOT_BOTTOM} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3" />}
+        {bottomSlotOk && (
+          <AdUnit slot={AD_SLOT_BOTTOM} enabled={adsEnabled} className="glass ring-soft rounded-2xl p-3" />
+        )}
       </div>
 
       {/* FILTERS PANEL */}
       {filtersOpen && (
         <div className="fixed inset-0 z-[999]">
-          <button
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setFiltersOpen(false)}
-            aria-label="Close filters"
-          />
+          <button className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} aria-label="Close filters" />
 
           <div className="absolute right-0 top-0 h-full w-full max-w-md bg-[#0b1220] border-l border-white/10 p-5 text-white">
             <div className="flex items-center justify-between">
               <div className="text-lg font-extrabold">Filters</div>
-              <button
-                onClick={() => setFiltersOpen(false)}
-                className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
-              >
+              <button onClick={() => setFiltersOpen(false)} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15">
                 ✕
               </button>
             </div>
@@ -1042,10 +993,7 @@ export default function DashboardClient() {
                   Reset
                 </button>
 
-                <button
-                  onClick={() => setFiltersOpen(false)}
-                  className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500"
-                >
+                <button onClick={() => setFiltersOpen(false)} className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500">
                   Apply
                 </button>
               </div>

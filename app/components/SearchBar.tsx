@@ -1,37 +1,41 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 
-function isAddress(a: string) {
-  return /^0x[a-fA-F0-9]{40}$/.test(a.trim());
+function extractAddress(input: string) {
+  let s = String(input || "");
+
+  // decode URL encoding safely
+  try {
+    s = decodeURIComponent(s);
+  } catch {}
+
+  // remove whitespace everywhere
+  s = s.trim().replace(/\s+/g, "");
+
+  // extract 0x..40hex from ANY string (URL, base:0x..., etc.)
+  const m = s.match(/0x[a-fA-F0-9]{40}/);
+  return m ? m[0].toLowerCase() : null;
 }
 
 export default function SearchBar() {
   const [q, setQ] = useState("");
   const router = useRouter();
-  const pathname = usePathname();
 
   function go() {
-    const value = q.trim();
-    if (!value) return;
+    if (!q) return;
 
-    // ✅ If user pasted a contract address → go to token page
-    if (isAddress(value)) {
-      // If you want Zora coin page by default:
-      // router.push(`/zora/coin/${value.toLowerCase()}`);
+    const addr = extractAddress(q);
 
-      // If you want Dex token page by default:
-      router.push(`/token/${value.toLowerCase()}`);
+    // ✅ if it contains an address → go to token detail
+    if (addr) {
+      router.push(`/token/${addr}`);
       return;
     }
 
-    // ✅ If not address, treat as search query (symbol/name)
-    // You can redirect to dashboard search filter
-    router.push(`/dashboard?q=${encodeURIComponent(value)}`);
-
-    // optional: if already on dashboard, just update query
-    // (router.push is fine either way)
+    // ✅ otherwise do text search
+    router.push(`/dashboard?q=${encodeURIComponent(q.trim())}`);
   }
 
   return (

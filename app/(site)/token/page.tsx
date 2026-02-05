@@ -1,6 +1,24 @@
 import { Suspense } from "react";
 import TokenClient from "./TokenClient";
 
+function safeDecode(s: string) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+function extractAddress(input: string) {
+  const cleaned = safeDecode(String(input || ""))
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/\/+$/, ""); // remove trailing slash
+
+  const m = cleaned.match(/0x[a-fA-F0-9]{40}/);
+  return m ? m[0].toLowerCase() : "";
+}
+
 function TokenFallback({ address }: { address: string }) {
   return (
     <main className="min-h-screen text-white">
@@ -37,7 +55,8 @@ function TokenFallback({ address }: { address: string }) {
 }
 
 export default function TokenPage({ params }: { params: { address: string } }) {
-  const address = decodeURIComponent(params?.address || "").trim().toLowerCase();
+  // ✅ Extract a clean 0x address from any route param shape
+  const address = extractAddress(params?.address || "");
 
   return (
     <Suspense fallback={<TokenFallback address={address} />}>

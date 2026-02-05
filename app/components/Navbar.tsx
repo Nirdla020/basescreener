@@ -4,8 +4,15 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-function isAddress(a: string) {
-  return /^0x[a-fA-F0-9]{40}$/.test(a.trim());
+/* -------------------- Robust address extractor -------------------- */
+function extractAddress(input: string) {
+  let s = String(input || "");
+  try {
+    s = decodeURIComponent(s);
+  } catch {}
+  s = s.trim().replace(/\s+/g, "").replace(/\/+$/, "");
+  const m = s.match(/0x[a-fA-F0-9]{40}/);
+  return m ? m[0].toLowerCase() : "";
 }
 
 export default function Navbar() {
@@ -16,14 +23,15 @@ export default function Navbar() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
 
-  // keep input synced with URL (so it doesn't reset)
-  // but don't fight the user while typing
+  // ✅ Keep input synced with URL ONLY on dashboard (no conditional deps, no stale q)
   useEffect(() => {
-    const urlQ = sp.get("q") || "";
-    if (urlQ !== q) setQ(urlQ);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp]);
+    if (!pathname?.startsWith("/dashboard")) return;
 
+    const urlQ = sp.get("q") || "";
+    setQ((prev) => (prev === urlQ ? prev : urlQ));
+  }, [pathname, sp]);
+
+  // close mobile menu on route change
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
@@ -37,31 +45,12 @@ export default function Navbar() {
     return "home";
   }, [pathname]);
 
-  function onSearch() {
-    const query = q.trim();
-    if (!query) return;
-
-    // ✅ close mobile menu
-    setOpen(false);
-
-    // ✅ Address -> go to your dynamic route page
-    if (isAddress(query)) {
-      const addr = query.toLowerCase();
-
-      // ✅ DEFAULT: go to Zora coin page
-      router.push(`/zora/coin/${addr}`);
-
-      // If you want Dex token page instead, use this line:
-      // router.push(`/token/${addr}`);
-
-      return;
-    }
-
-    // ✅ Text -> dashboard filter
-    router.push(`/dashboard?q=${encodeURIComponent(query)}`);
+  function navBtn(isActive: boolean) {
+    return `px-4 py-2 rounded-xl border border-white/10 transition ${
+      isActive ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
+    }`;
   }
 
-  // ✅ Scroll to Support section
   function goSupport() {
     const el = document.getElementById("support");
     if (!el) return;
@@ -69,11 +58,19 @@ export default function Navbar() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  // Small helper for consistent nav button styling
-  function navBtn(isActive: boolean) {
-    return `px-4 py-2 rounded-xl border border-white/10 transition ${
-      isActive ? "bg-white text-[#020617] font-bold" : "bg-white/5 text-white/80 hover:bg-white/10"
-    }`;
+  function onSearch() {
+    const raw = q;
+    if (!raw.trim()) return;
+
+    setOpen(false);
+
+    const addr = extractAddress(raw);
+    if (addr) {
+      router.push(`/token/${addr}`);
+      return;
+    }
+
+    router.push(`/dashboard?q=${encodeURIComponent(raw.trim())}`);
   }
 
   return (
@@ -108,7 +105,7 @@ export default function Navbar() {
                     onSearch();
                   }
                 }}
-                placeholder="Search token (symbol/name) or paste 0x address..."
+                placeholder="Search token (symbol/name) or paste 0x / URL..."
                 className="
                   w-full min-w-0 bg-transparent outline-none
                   text-white placeholder:text-white/55
@@ -116,14 +113,20 @@ export default function Navbar() {
                 "
               />
 
+              {q && (
+                <button
+                  onClick={() => setQ("")}
+                  className="text-white/60 hover:text-white px-2"
+                  aria-label="Clear search"
+                  type="button"
+                >
+                  ✕
+                </button>
+              )}
+
               <button
                 onClick={onSearch}
-                className="
-                  px-4 py-2 rounded-xl
-                  bg-blue-600 text-white font-bold
-                  hover:bg-blue-500 transition
-                  shrink-0
-                "
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition shrink-0"
               >
                 Search
               </button>
@@ -140,7 +143,6 @@ export default function Navbar() {
               Token
             </Link>
 
-            {/* ✅ Zora pages */}
             <Link href="/zora-new" className={navBtn(active === "zora-new")}>
               🆕 Zora New
             </Link>
@@ -183,6 +185,7 @@ export default function Navbar() {
         <div className="md:hidden mt-3">
           <div className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-3 py-2">
             <span className="text-white/70">🔎</span>
+
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -192,9 +195,21 @@ export default function Navbar() {
                   onSearch();
                 }
               }}
-              placeholder="Search token or paste 0x..."
+              placeholder="Search token / paste 0x / URL..."
               className="w-full min-w-0 bg-transparent outline-none text-white placeholder:text-white/55 text-sm"
             />
+
+            {q && (
+              <button
+                onClick={() => setQ("")}
+                className="text-white/60 hover:text-white px-2"
+                aria-label="Clear search"
+                type="button"
+              >
+                ✕
+              </button>
+            )}
+
             <button
               onClick={onSearch}
               className="px-3 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition shrink-0 text-sm"
@@ -216,7 +231,6 @@ export default function Navbar() {
                 Token
               </Link>
 
-              {/* ✅ Zora pages (mobile) */}
               <Link href="/zora-new" className={navBtn(active === "zora-new") + " text-center"}>
                 🆕 Zora New
               </Link>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import AdUnit from "../../components/AdUnit"; // ✅ FIXED PATH (from app/(site)/token -> app/components)
+import AdUnit from "../../components/AdUnit";
 
 type DexPair = {
   chainId: string;
@@ -19,8 +19,26 @@ type DexPair = {
   txns?: { h24?: { buys?: number; sells?: number } };
 };
 
+function safeDecode(s: string) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+function extractAddress(input: string) {
+  const cleaned = safeDecode(String(input || ""))
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/\/+$/, "");
+
+  const m = cleaned.match(/0x[a-fA-F0-9]{40}/);
+  return m ? m[0].toLowerCase() : "";
+}
+
 function isAddress(a: string) {
-  return /^0x[a-fA-F0-9]{40}$/.test(a.trim());
+  return /^0x[a-fA-F0-9]{40}$/.test(String(a || "").trim());
 }
 
 function fmtUsd(n?: number) {
@@ -42,8 +60,7 @@ function readWatchlist(): string[] {
   try {
     const raw = localStorage.getItem("watchlist_base") || "[]";
     const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr.filter((x) => typeof x === "string");
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
   } catch {
     return [];
   }
@@ -55,7 +72,7 @@ function writeWatchlist(list: string[]) {
 
 export default function TokenClient({ addressFromRoute }: { addressFromRoute?: string }) {
   const sp = useSearchParams();
-  const lastAutoRef = useRef<string>(""); // ✅ prevent repeated auto-search
+  const lastAutoRef = useRef<string>("");
 
   const [address, setAddress] = useState("");
   const [pairs, setPairs] = useState<DexPair[]>([]);
@@ -63,13 +80,11 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
   const [error, setError] = useState("");
   const [watchCount, setWatchCount] = useState(0);
 
-  const normalized = useMemo(() => address.trim(), [address]);
+  const normalized = useMemo(() => extractAddress(address), [address]);
 
-  // ✅ Put your REAL AdSense slot IDs here (from AdSense)
-  const AD_SLOT_TOP = "PUT_SLOT_ID_HERE";
-  const AD_SLOT_BOTTOM = "PUT_SLOT_ID_HERE";
+  const AD_SLOT_TOP = "";
+  const AD_SLOT_BOTTOM = "";
 
-  // ✅ AdSense-safe gating: show ads ONLY when there are real results
   const hasContent = pairs.length > 0;
   const canShowAds = !loading && error === "" && hasContent;
 
@@ -77,36 +92,32 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
     setWatchCount(readWatchlist().length);
   }, []);
 
-  // ✅ auto-fill from route param OR ?q=
+  // ✅ Auto-load when landing on /token/[address] OR /token?q=
   useEffect(() => {
-    const fromRoute = (addressFromRoute || "").trim();
-    const fromQuery = (sp.get("q") || "").trim();
-    const qRaw = fromRoute || fromQuery;
-    if (!qRaw) return;
+    const raw = (addressFromRoute || sp.get("q") || "").toString();
+    if (!raw) return;
 
-    const q = qRaw.toLowerCase().trim();
-    setAddress(q);
+    const addr = extractAddress(raw);
 
-    if (!isAddress(q)) {
-      setError("Token page accepts only a 0x address.");
+    setAddress(addr || raw.trim());
+
+    if (!addr || !isAddress(addr)) {
       setPairs([]);
+      setError("Token page accepts only a valid 0x address.");
       return;
     }
 
-    // ✅ avoid repeating auto-search
-    if (lastAutoRef.current === q) return;
-    lastAutoRef.current = q;
+    if (lastAutoRef.current === addr) return;
+    lastAutoRef.current = addr;
 
-    setTimeout(() => {
-      searchToken(q);
-    }, 0);
+    searchToken(addr);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addressFromRoute, sp]);
 
   async function searchToken(forced?: string) {
-    const a = (forced ?? normalized).trim().toLowerCase();
+    const a = extractAddress(forced ?? normalized);
 
-    if (!isAddress(a)) {
+    if (!a || !isAddress(a)) {
       setError("Invalid address. Must be 0x + 40 hex characters.");
       setPairs([]);
       return;
@@ -122,8 +133,8 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`${res.status} ${text}`);
+        const text = await res.text().catch(() => "");
+        throw new Error(`DexScreener HTTP ${res.status} ${text}`.trim());
       }
 
       const data = (await res.json()) as DexPair[];
@@ -141,7 +152,7 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
   }
 
   function addToWatchlist() {
-    const a = normalized.toLowerCase();
+    const a = normalized;
 
     if (!isAddress(a)) {
       setError("Invalid address. Cannot add.");
@@ -153,7 +164,6 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
       setError("Already in watchlist.");
       return;
     }
-
     if (current.length >= 30) {
       setError("Max 30 in watchlist.");
       return;
@@ -172,12 +182,9 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
 
   return (
     <div className="page-container py-10 text-white">
-      <div className="text-white/60 text-sm mb-2">Token page loaded ✅</div>
-
       <h1 className="text-4xl font-extrabold text-blue-400 mb-2">Token Lookup (Base)</h1>
       <p className="text-blue-200 mb-6">Paste a Base token address. Add it to your watchlist (saved locally).</p>
 
-      {/* ✅ Publisher content */}
       <div className="rounded-2xl bg-white/5 border border-white/10 p-5 text-sm text-white/70 leading-relaxed mb-4">
         <p>
           This page shows liquidity pools and market activity for a Base token using DexScreener data. Results include
@@ -186,18 +193,16 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
         <p className="mt-2 text-white/50">Disclaimer: This is informational only and not financial advice.</p>
       </div>
 
-      {/* ✅ Top Ad (ONLY when real results exist) */}
       {AD_SLOT_TOP && (
         <div className="mb-4">
           <AdUnit slot={AD_SLOT_TOP} enabled={canShowAds} className="glass ring-soft rounded-2xl p-3" />
         </div>
       )}
 
-      {/* Search bar */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="flex flex-col md:flex-row gap-3">
           <div className="flex-1">
-            <div className="flex items-center gap-2 rounded-2xl border border-blue-500/40 bg-black/40 px-4 py-3 focus-within:border-blue-400">
+            <div className="flex items-center gap-2 rounded-2xl border border-blue-500/40 bg-black/40 px-4 py-3">
               <span className="text-white/70">🔎</span>
               <input
                 value={address}
@@ -210,7 +215,7 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
               />
             </div>
             <div className="mt-2 text-xs text-white/50">
-              Tip: This page accepts only a <span className="font-mono">0x...</span> address.
+              Tip: You can paste a URL or base:0x… — we’ll extract the address.
             </div>
           </div>
 
@@ -233,7 +238,6 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
         {error && <div className="mt-4 text-red-300 break-words">{error}</div>}
       </div>
 
-      {/* Results */}
       {sortedPairs.length > 0 && (
         <div className="mt-6 space-y-4">
           {sortedPairs.slice(0, 12).map((p) => {
@@ -285,7 +289,6 @@ export default function TokenClient({ addressFromRoute }: { addressFromRoute?: s
         </div>
       )}
 
-      {/* ✅ Bottom Ad (ONLY when real results exist) */}
       {AD_SLOT_BOTTOM && (
         <div className="mt-6">
           <AdUnit slot={AD_SLOT_BOTTOM} enabled={canShowAds} className="glass ring-soft rounded-2xl p-3" />
