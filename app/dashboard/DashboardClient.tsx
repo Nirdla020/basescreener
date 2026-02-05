@@ -193,9 +193,17 @@ export default function DashboardClient() {
   const poolRef = useRef<Map<string, DexPairWithSeen>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
 
+  // ✅ Zorbit-style: ?q= can be address OR text filter
   useEffect(() => {
-    const qp = sp.get("q") || "";
-    if (qp) setQuery(qp);
+    const qp = (sp.get("q") || "").trim();
+    if (!qp) return;
+
+    if (isAddress(qp)) {
+      setTokenAddr(qp);
+      setQuery("");
+    } else {
+      setQuery(qp);
+    }
   }, [sp]);
 
   useEffect(() => {
@@ -229,10 +237,7 @@ export default function DashboardClient() {
     ];
 
     const rotate = Math.floor(Date.now() / 60_000) % NEW_DISCOVERY_QUERIES.length;
-    const rotatedNew = [...NEW_DISCOVERY_QUERIES.slice(rotate), ...NEW_DISCOVERY_QUERIES.slice(0, rotate)].slice(
-      0,
-      6
-    );
+    const rotatedNew = [...NEW_DISCOVERY_QUERIES.slice(rotate), ...NEW_DISCOVERY_QUERIES.slice(0, rotate)].slice(0, 6);
 
     const queries = [...TRENDING_QUERIES, ...rotatedNew];
 
@@ -592,17 +597,18 @@ export default function DashboardClient() {
               >
                 <div className="flex items-center gap-2">
                   <span>{label}</span>
+
+                  {/* ✅ FIXED JSX + shows saved count */}
                   {k === "saved" && (
                     <span
                       className={`px-2 py-0.5 rounded-full text-[11px] border border-white/15 ${
-                        tab === "saved"
-                          ? "bg-white text-[#020617]"
-                          : "bg-white/10 text-white/80"
+                        tab === "saved" ? "bg-white text-[#020617]" : "bg-white/10 text-white/80"
                       }`}
-                     >
-                       Saved
-                     </span>
-                    )}
+                      title="Saved tokens count"
+                    >
+                      {savedCount}
+                    </span>
+                  )}
                 </div>
               </button>
             ))}
@@ -682,12 +688,7 @@ export default function DashboardClient() {
               return (
                 <div
                   key={`${addr}:${r.pairAddress}`}
-                  onClick={() =>
-                    router.push({
-                      pathname: "/token/[address]",
-                      params: { address: addr },
-                    } as any)
-                  }
+                  onClick={() => router.push(`/token/${addr}`)}
                   className="cursor-pointer rounded-2xl bg-white/5 border border-white/10 p-4 hover:bg-white/10 transition"
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -830,12 +831,7 @@ export default function DashboardClient() {
                 return (
                   <div
                     key={`${addr}:${r.pairAddress}`}
-                    onClick={() =>
-                      router.push({
-                        pathname: "/token/[address]",
-                        params: { address: addr },
-                      } as any)
-                    }
+                    onClick={() => router.push(`/token/${addr}`)}
                     className="cursor-pointer grid grid-cols-14 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition items-center"
                   >
                     <div className="text-white/80 font-bold">{i + 1}</div>
@@ -931,12 +927,19 @@ export default function DashboardClient() {
       {/* FILTERS PANEL */}
       {filtersOpen && (
         <div className="fixed inset-0 z-[999]">
-          <button className="absolute inset-0 bg-black/60" onClick={() => setFiltersOpen(false)} aria-label="Close filters" />
+          <button
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setFiltersOpen(false)}
+            aria-label="Close filters"
+          />
 
           <div className="absolute right-0 top-0 h-full w-full max-w-md bg-[#0b1220] border-l border-white/10 p-5 text-white">
             <div className="flex items-center justify-between">
               <div className="text-lg font-extrabold">Filters</div>
-              <button onClick={() => setFiltersOpen(false)} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15">
+              <button
+                onClick={() => setFiltersOpen(false)}
+                className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+              >
                 ✕
               </button>
             </div>
@@ -993,7 +996,10 @@ export default function DashboardClient() {
                   Reset
                 </button>
 
-                <button onClick={() => setFiltersOpen(false)} className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500">
+                <button
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500"
+                >
                   Apply
                 </button>
               </div>
