@@ -4,7 +4,7 @@ export default function TradeButtons({ address }: { address: string }) {
   const a = address.toLowerCase();
 
   // 🔁 Change this to YOUR Zora username
-  const ZORA_USERNAME = "@basescreener"; // <-- edit this
+  const ZORA_USERNAME = "basescreener"; // <-- edit this
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -41,7 +41,7 @@ export default function TradeButtons({ address }: { address: string }) {
       {/* Zora Create / Activate */}
       <a
         className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-500 transition"
-        href={`https://zora.co/@${basescreener}`}
+        href="https://zora.co/@basescreener"
         target="_blank"
         rel="noreferrer"
       >

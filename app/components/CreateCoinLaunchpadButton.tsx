@@ -84,7 +84,7 @@ export default function CreateCoinLaunchpadButton() {
       <div className="text-sm font-bold text-white">Create coin (Launchpad)</div>
       <div className="mt-1 text-xs text-white/60">
         Creates the coin via Zora contracts and permanently sets your{" "}
-        <code className="text-white/80">platformReferrer</code>. :contentReference[oaicite:6]{index=6}
+        <code className="text-white/80">platformReferrer</code>.
       </div>
 
       <div className="mt-4 grid gap-2">
