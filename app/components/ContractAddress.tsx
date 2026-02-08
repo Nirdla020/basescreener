@@ -1,7 +1,7 @@
 "use client";
 
 export default function ContractAddress() {
-  const CA = "0x7a773b71617d09770a43f457107850b0adaf89db";
+  const CA = "0x06640d7ba28d7e914a7f1e0d0283e95f4b02111c";
 
   return (
     <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-3 bg-white/5 border border-blue-500/20 px-4 py-3 rounded-xl max-w-3xl mx-auto">

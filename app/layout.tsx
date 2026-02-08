@@ -7,6 +7,7 @@ import SupportCTA from "./components/SupportCTA";
 import TopBar from "./components/TopBar";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/react";
+import Providers from "./providers";
 
 /* ✅ Global SEO Metadata */
 export const metadata: Metadata = {
@@ -92,8 +93,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-screen bg-[#020617] text-white overflow-x-hidden">
-        {/* ✅ Google AdSense script (safe to keep global). 
-            Using lazyOnload reduces chance of pushing ads during initial skeletons. */}
+        {/* ✅ Google AdSense */}
         <Script
           id="adsense"
           async
@@ -110,26 +110,24 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
 
-        <div className="min-h-screen flex flex-col">
-          <TopBar />
+        {/* ✅ IMPORTANT: Wrap everything with Providers so Wagmi works in Navbar */}
+        <Providers>
+          <div className="min-h-screen flex flex-col">
+            <TopBar />
 
-          <Suspense fallback={<div className="h-14" />}>
-            <Navbar />
-          </Suspense>
+            <Suspense fallback={<div className="h-14" />}>
+              <Navbar />
+            </Suspense>
 
-          {/* ✅ Main content area */}
-          {/* IMPORTANT: Don't double-wrap children with a max-width container here,
-              because pages like Dashboard already add their own container.
-              Let each page control its layout. */}
-          <main className="flex-1 w-full">{children}</main>
+            <main className="flex-1 w-full">{children}</main>
 
-          {/* Keep CTA aligned nicely */}
-          <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-            <SupportCTA />
+            <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+              <SupportCTA />
+            </div>
+
+            <FooterSupport />
           </div>
-
-          <FooterSupport />
-        </div>
+        </Providers>
 
         <Analytics />
       </body>
