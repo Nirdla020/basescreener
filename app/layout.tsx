@@ -8,6 +8,7 @@ import TopBar from "./components/TopBar";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/react";
 import Providers from "./providers";
+import TrackView from "./components/TrackView";
 
 /* ✅ Global SEO Metadata */
 export const metadata: Metadata = {
@@ -112,6 +113,11 @@ export default function RootLayout({
 
         {/* ✅ IMPORTANT: Wrap everything with Providers so Wagmi works in Navbar */}
         <Providers>
+          {/* ✅ Track page views (client) */}
+          <Suspense fallback={null}>
+            <TrackView />
+          </Suspense>
+
           <div className="min-h-screen flex flex-col">
             <TopBar />
 
