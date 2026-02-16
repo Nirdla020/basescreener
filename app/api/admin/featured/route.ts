@@ -1,28 +1,39 @@
+// app/api/admin/featured/route.ts
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+
+import { kvReady } from "@/lib/kv";
+import {
+  listFeatured,
+  upsertFeatured,
+  removeFeatured,
+  nowIso,
+  addDaysIso,
+  type FeaturedItem,
+} from "@/lib/featuredStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type FeaturedItem = {
-  chainId: number; // 8453
-  address: string;
-  title?: string;
+/* ---------------- Auth ---------------- */
 
-  // ✅ NEW: sponsor can have custom logo
-  logoUrl?: string;
+function norm(a: string) {
+  return a.trim().toLowerCase();
+}
 
-  weight: number;
-  promoted: boolean;
-  expiresAt?: string; // YYYY-MM-DD
-  createdAt: string; // ISO
-  updatedAt: string; // ISO
-};
+async function requireAdmin(): Promise<boolean> {
+  const admin = process.env.ADMIN_WALLET ? norm(process.env.ADMIN_WALLET) : "";
+  if (!admin) return false;
 
-// ✅ In-memory store (dev only). Later move to KV/DB.
-let featured: FeaturedItem[] = [];
+  const cookieStore = await cookies();
+  const addr = norm(cookieStore.get("admin_addr")?.value || "");
+  return addr === admin;
+}
+
+/* ---------------- Utils ---------------- */
 
 function isAddr(a?: string) {
-  return !!a && /^0x[a-fA-F0-9]{40}$/.test(a);
+  return !!a && /^0x[a-fA-F0-9]{40}$/.test(String(a || "").trim());
 }
 
 function cleanStr(v: any, max = 80) {
@@ -35,101 +46,131 @@ function toInt(v: any, def = 10) {
   return Number.isFinite(n) ? Math.floor(n) : def;
 }
 
-function isDateYYYYMMDD(s?: string) {
-  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
+/* ---------------- Handlers ---------------- */
 
-function isExpired(expiresAt?: string) {
-  if (!expiresAt) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return expiresAt < today;
-}
-
-// GET → list featured items (sorted)
+// GET (ADMIN) -> list featured items
 export async function GET() {
-  const items = featured
-    .filter((x) => !isExpired(x.expiresAt))
-    .sort((a, b) => (b.weight || 0) - (a.weight || 0));
+  const ok = await requireAdmin();
 
-  return NextResponse.json({ items });
+  // ✅ DEBUG: helps confirm Production env vars on live domain
+  const env = {
+    hasAdminWallet: !!process.env.ADMIN_WALLET,
+    kvReady: kvReady(),
+    hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+    hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+  };
+
+  if (!ok) {
+    return NextResponse.json({ error: "Unauthorized", env }, { status: 401 });
+  }
+
+  const items = await listFeatured();
+
+  // sort: promoted first, then weight desc, then newest
+  items.sort((a, b) => {
+    const p = Number(!!b.promoted) - Number(!!a.promoted);
+    if (p) return p;
+    const w = Number(b.weight || 0) - Number(a.weight || 0);
+    if (w) return w;
+    return Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  });
+
+  return NextResponse.json({ items, env });
 }
 
-// POST → upsert featured item
+// POST (ADMIN) -> upsert featured item
 export async function POST(req: Request) {
-  try {
-    const body = await req.json().catch(() => ({}));
+  const ok = await requireAdmin();
 
-    const chainId = toInt(body.chainId, 8453);
-    const address = cleanStr(body.address, 60).toLowerCase();
-    const title = cleanStr(body.title, 60) || undefined;
+  // ✅ DEBUG: include env here too
+  const env = {
+    hasAdminWallet: !!process.env.ADMIN_WALLET,
+    kvReady: kvReady(),
+    hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+    hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+  };
 
-    // ✅ accept sponsor custom logo url (can be https://... or /sponsors/... from /public)
-    const logoUrl = cleanStr(body.logoUrl, 300) || undefined;
+  if (!ok) return NextResponse.json({ error: "Unauthorized", env }, { status: 401 });
 
-    const weight = toInt(body.weight, 10);
-    const promoted = !!body.promoted;
+  const body = await req.json().catch(() => ({}));
 
-    const expiresAtRaw = cleanStr(body.expiresAt, 20);
-    const expiresAt = isDateYYYYMMDD(expiresAtRaw) ? expiresAtRaw : undefined;
+  const chainId = toInt(body.chainId, 8453);
+  const address = cleanStr(body.address, 60).toLowerCase();
+  const title = cleanStr(body.title, 80) || undefined;
+  const logoUrl = cleanStr(body.logoUrl, 400) || undefined;
 
-    if (!isAddr(address)) {
-      return NextResponse.json({ error: "Invalid token address." }, { status: 400 });
-    }
+  const weight = toInt(body.weight, 10);
+  const promoted = !!body.promoted;
 
-    const now = new Date().toISOString();
+  // Accept either:
+  // - expiresAt ISO string
+  // - days number (auto compute)
+  const days = toInt(body.days, 0);
+  const expiresAt =
+    typeof body.expiresAt === "string" && body.expiresAt.trim()
+      ? body.expiresAt.trim()
+      : days > 0
+      ? addDaysIso(days)
+      : addDaysIso(1);
 
-    const idx = featured.findIndex(
-      (x) => x.address.toLowerCase() === address && x.chainId === chainId
-    );
-
-    if (idx >= 0) {
-      featured[idx] = {
-        ...featured[idx],
-        title,
-        logoUrl,
-        weight,
-        promoted,
-        expiresAt,
-        updatedAt: now,
-      };
-    } else {
-      featured.push({
-        chainId,
-        address,
-        title,
-        logoUrl,
-        weight,
-        promoted,
-        expiresAt,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-
-    const items = featured
-      .filter((x) => !isExpired(x.expiresAt))
-      .sort((a, b) => (b.weight || 0) - (a.weight || 0));
-
-    return NextResponse.json({ ok: true, items });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Bad request" }, { status: 400 });
+  if (chainId !== 8453) {
+    return NextResponse.json({ error: "Only Base (8453) supported.", env }, { status: 400 });
   }
+
+  if (!isAddr(address)) {
+    return NextResponse.json({ error: "Invalid token address.", env }, { status: 400 });
+  }
+
+  const exp = Date.parse(expiresAt);
+  if (!Number.isFinite(exp)) {
+    return NextResponse.json({ error: "Invalid expiresAt. Use ISO or days.", env }, { status: 400 });
+  }
+
+  const now = nowIso();
+
+  const item: FeaturedItem = {
+    chainId,
+    address,
+    title,
+    logoUrl,
+    weight,
+    promoted,
+    createdAt: now,
+    expiresAt: new Date(exp).toISOString(), // normalize to ISO
+  };
+
+  await upsertFeatured(item);
+
+  const items = await listFeatured();
+  return NextResponse.json({ ok: true, items, env });
 }
 
-// DELETE → remove featured by address query (?address=0x...)
+// DELETE (ADMIN) -> remove featured
 export async function DELETE(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const address = (searchParams.get("address") || "").toLowerCase();
+  const ok = await requireAdmin();
 
-    if (!isAddr(address)) {
-      return NextResponse.json({ error: "Invalid address" }, { status: 400 });
-    }
+  const env = {
+    hasAdminWallet: !!process.env.ADMIN_WALLET,
+    kvReady: kvReady(),
+    hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+    hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+  };
 
-    featured = featured.filter((x) => x.address.toLowerCase() !== address);
+  if (!ok) return NextResponse.json({ error: "Unauthorized", env }, { status: 401 });
 
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Bad request" }, { status: 400 });
+  const { searchParams } = new URL(req.url);
+  const address = (searchParams.get("address") || "").toLowerCase();
+  const chainId = Number(searchParams.get("chainId") || 8453);
+
+  if (chainId !== 8453) {
+    return NextResponse.json({ error: "Only Base (8453) supported.", env }, { status: 400 });
   }
+
+  if (!isAddr(address)) {
+    return NextResponse.json({ error: "Invalid address", env }, { status: 400 });
+  }
+
+  await removeFeatured(chainId, address);
+
+  return NextResponse.json({ ok: true, env });
 }

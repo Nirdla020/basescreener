@@ -1,284 +1,139 @@
-"use client";
+import { listPayments, getEarningsSummary } from "@/lib/featuredStore";
 
-import { useEffect, useMemo, useState } from "react";
-import { useAccount, useSignMessage } from "wagmi";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type FeaturedToken = {
-  chainId: number;
-  address: string;
-  title?: string;
-  note?: string;
-  weight?: number;
-  expiresAt?: string;
-  promoted?: boolean;
-  createdAt?: string;
-};
+/* ---------- Utils ---------- */
 
-export default function AdminPage() {
-  const { address, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+function weiToEth6(weiStr?: string) {
+  if (!weiStr) return "—";
+  try {
+    const wei = BigInt(weiStr);
+    const base = BigInt("1000000000000000000"); // 1e18
+    const whole = wei / base;
+    const frac = wei % base;
 
-  const [authed, setAuthed] = useState(false);
-  const [items, setItems] = useState<FeaturedToken[]>([]);
-  const [msg, setMsg] = useState("");
+    const frac6 = (frac / BigInt("1000000000000")) // 1e12
+      .toString()
+      .padStart(6, "0");
 
-  // form
-  const [tokenAddr, setTokenAddr] = useState("");
-  const [title, setTitle] = useState("");
-  const [weight, setWeight] = useState("10");
-  const [promoted, setPromoted] = useState(false);
-  const [expiresAt, setExpiresAt] = useState("");
-
-  async function refresh() {
-    const res = await fetch("/api/admin/featured");
-
-    if (!res.ok) {
-      setAuthed(false);
-      return;
-    }
-
-    const json = await res.json();
-    setItems(json.items || []);
-    setAuthed(true);
+    return `${whole.toString()}.${frac6}`;
+  } catch {
+    return "—";
   }
+}
 
-  useEffect(() => {
-    refresh();
-  }, []);
+function shortAddr(a?: string) {
+  if (!a) return "—";
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
 
-  async function login() {
-    try {
-      if (!isConnected || !address) {
-        return setMsg("Connect your admin wallet first.");
-      }
+function fmtUsd(n?: number) {
+  if (!n) return "$0";
+  return `$${Number(n).toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}`;
+}
 
-      setMsg("Requesting nonce...");
+function fmtDate(ts?: string) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
 
-      const n = await fetch("/api/admin/nonce").then((r) => r.json());
+/* ---------- Page ---------- */
 
-      const message = `BaseScreener Admin Login\nNonce: ${n.nonce}`;
-
-      setMsg("Sign message...");
-
-      const signature = await signMessageAsync({ message });
-
-      setMsg("Verifying...");
-
-      const res = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, signature }),
-      });
-
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        return setMsg(json?.error || "Login failed.");
-      }
-
-      setMsg("Logged in ✅");
-
-      await refresh();
-    } catch (e: any) {
-      setMsg(e?.message || "Login failed.");
-    }
-  }
-
-  async function logout() {
-    await fetch("/api/admin/logout", { method: "POST" });
-
-    setAuthed(false);
-    setItems([]);
-    setMsg("Logged out.");
-  }
-
-  async function addFeatured() {
-    setMsg("");
-
-    const res = await fetch("/api/admin/featured", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chainId: 8453,
-        address: tokenAddr,
-        title,
-        weight: Number(weight || 0),
-        promoted,
-        expiresAt: expiresAt || undefined,
-      }),
-    });
-
-    const json = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      return setMsg(json?.error || "Save failed.");
-    }
-
-    setTokenAddr("");
-    setTitle("");
-    setExpiresAt("");
-
-    setMsg("Saved ✅");
-
-    await refresh();
-  }
-
-  async function removeFeatured(addr: string) {
-    const res = await fetch(
-      `/api/admin/featured?address=${encodeURIComponent(addr)}`,
-      { method: "DELETE" }
-    );
-
-    const json = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      return setMsg(json?.error || "Remove failed.");
-    }
-
-    setMsg("Removed ✅");
-
-    await refresh();
-  }
-
-  const sorted = useMemo(() => {
-    return [...items].sort(
-      (a, b) => Number(b.weight || 0) - Number(a.weight || 0)
-    );
-  }, [items]);
+export default async function RevenuePage() {
+  const summary = await getEarningsSummary(500);
+  const payments = await listPayments(100);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+    <main className="mx-auto w-full max-w-5xl px-4 py-8">
+      <div className="text-2xl font-bold mb-4">💰 Earnings</div>
 
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-lg font-bold">Admin Dashboard</div>
-            <div className="text-xs text-white/60">
-              Featured & Analytics Manager
-            </div>
+      {/* SUMMARY */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">Total USD</div>
+          <div className="text-lg font-bold">
+            {fmtUsd(summary.totalUsd)}
           </div>
-
-          {!authed ? (
-            <button
-              onClick={login}
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500"
-            >
-              Login (Sign)
-            </button>
-          ) : (
-            <button
-              onClick={logout}
-              className="rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm hover:bg-black/50"
-            >
-              Logout
-            </button>
-          )}
         </div>
 
-        {msg && <div className="mt-3 text-xs text-white/70">{msg}</div>}
-
-        {!authed ? (
-          <div className="mt-4 text-sm text-white/70">
-            Connect your admin wallet and click <b>Login</b>.
+        <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">Total ETH</div>
+          <div className="text-lg font-bold">
+            {weiToEth6(summary.totalWei)} ETH
           </div>
-        ) : (
-          <>
-            {/* Add featured */}
-            <div className="mt-6 grid gap-3">
-              <div className="text-sm font-bold">Add / Update Featured</div>
+        </div>
 
-              <input
-                value={tokenAddr}
-                onChange={(e) => setTokenAddr(e.target.value)}
-                placeholder="Token address (0x...)"
-                className="rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-white"
-              />
+        <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">Payments</div>
+          <div className="text-lg font-bold">
+            {summary.count}
+          </div>
+        </div>
 
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Title (optional)"
-                className="rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-white"
-              />
-
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  value={weight}
-                  onChange={(e) => setWeight(e.target.value)}
-                  placeholder="Weight"
-                  className="rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-white"
-                />
-
-                <input
-                  value={expiresAt}
-                  onChange={(e) => setExpiresAt(e.target.value)}
-                  placeholder="ExpiresAt (YYYY-MM-DD)"
-                  className="rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-white"
-                />
-              </div>
-
-              <label className="flex items-center gap-2 text-sm text-white/70">
-                <input
-                  type="checkbox"
-                  checked={promoted}
-                  onChange={(e) => setPromoted(e.target.checked)}
-                />
-                Paid promotion
-              </label>
-
-              <button
-                onClick={addFeatured}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500"
-              >
-                Save
-              </button>
-            </div>
-
-            {/* List */}
-            <div className="mt-8">
-              <div className="text-sm font-bold">Current Featured</div>
-
-              <div className="mt-3 grid gap-2">
-                {sorted.map((t) => (
-                  <div
-                    key={t.address}
-                    className="rounded-xl border border-white/10 bg-black/30 p-3 flex justify-between"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold truncate">
-                        {t.title || t.address}
-
-                        {t.promoted && (
-                          <span className="ml-2 text-[11px] bg-blue-600/30 px-2 py-0.5 rounded">
-                            Promoted
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="text-[11px] text-white/60 break-all">
-                        {t.address} • weight {t.weight ?? 0}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => removeFeatured(t.address)}
-                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-
-                {sorted.length === 0 && (
-                  <div className="text-sm text-white/60">
-                    No featured tokens yet.
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
+        <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+          <div className="text-xs text-white/60">Unique Payers</div>
+          <div className="text-lg font-bold">
+            {summary.uniquePayers}
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* PAYMENTS TABLE */}
+      <div className="rounded-xl border border-white/10 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-white/5 text-white/60">
+            <tr>
+              <th className="p-3 text-left">Date</th>
+              <th className="p-3 text-left">Token</th>
+              <th className="p-3 text-left">Payer</th>
+              <th className="p-3 text-left">Days</th>
+              <th className="p-3 text-left">USD</th>
+              <th className="p-3 text-left">ETH</th>
+              <th className="p-3 text-left">Tx</th>
+            </tr>
+          </thead>
+          <tbody>
+            {payments.map((p) => (
+              <tr
+                key={p.txHash}
+                className="border-t border-white/5 hover:bg-white/5"
+              >
+                <td className="p-3">{fmtDate(p.ts)}</td>
+                <td className="p-3">{shortAddr(p.tokenAddress)}</td>
+                <td className="p-3">{shortAddr(p.payer)}</td>
+                <td className="p-3">{p.days}</td>
+                <td className="p-3">{fmtUsd(p.usd)}</td>
+                <td className="p-3">
+                  {weiToEth6(p.amountWei)} ETH
+                </td>
+                <td className="p-3">
+                  <a
+                    href={`https://basescan.org/tx/${p.txHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    View
+                  </a>
+                </td>
+              </tr>
+            ))}
+
+            {payments.length === 0 && (
+              <tr>
+                <td colSpan={7} className="p-6 text-center text-white/60">
+                  No payments yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </main>
   );
 }

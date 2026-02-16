@@ -147,6 +147,7 @@ export default function Navbar() {
     if (pathname?.startsWith("/create")) return "create";
     if (pathname?.startsWith("/zora-new")) return "zora-new";
     if (pathname?.startsWith("/zora-trending")) return "zora-trending";
+    if (pathname?.startsWith("/featured")) return "promote";
     return "home";
   }, [pathname]);
 
@@ -269,8 +270,14 @@ export default function Navbar() {
           <Link href="/zora-new" className={navBtn(active === "zora-new")}>
             🆕 Zora New
           </Link>
+
           <Link href="/zora-trending" className={navBtn(active === "zora-trending")}>
             🔥 Zora Trending
+          </Link>
+
+          {/* ✅ NEW: Promote button */}
+          <Link href="/featured" className={navBtn(active === "promote")}>
+            🚀 Promote
           </Link>
         </nav>
 
@@ -305,6 +312,7 @@ export default function Navbar() {
                 >
                   Dashboard
                 </Link>
+
                 <Link
                   href="/token"
                   className={`${navBtn(active === "token")} text-center`}
@@ -312,6 +320,7 @@ export default function Navbar() {
                 >
                   Token
                 </Link>
+
                 <Link
                   href="/zora-new"
                   className={`${navBtn(active === "zora-new")} text-center`}
@@ -319,12 +328,22 @@ export default function Navbar() {
                 >
                   🆕 Zora New
                 </Link>
+
                 <Link
                   href="/zora-trending"
                   className={`${navBtn(active === "zora-trending")} text-center`}
                   onClick={() => setMobileOpen(false)}
                 >
                   🔥 Zora Trending
+                </Link>
+
+                {/* ✅ NEW: Promote button (full width on mobile grid) */}
+                <Link
+                  href="/featured"
+                  className={`${navBtn(active === "promote")} text-center col-span-2`}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  🚀 Promote
                 </Link>
               </div>
             </div>

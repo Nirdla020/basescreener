@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getCoinsNew, setApiKey } from "@zoralabs/coins-sdk";
+import { getCoinsNew, getCoins, setApiKey } from "@zoralabs/coins-sdk";
 import crypto from "crypto";
 import AvatarClient from "../components/AvatarClient";
 
@@ -13,7 +13,6 @@ export const metadata = {
 
 export const revalidate = 20;
 
-// ✅ Optional: key is NOT required. Keep this if you ever get a key later.
 if (process.env.ZORA_API_KEY) {
   setApiKey(process.env.ZORA_API_KEY);
 }
@@ -33,22 +32,39 @@ function isBaseCoin(c: any) {
 
   if (Number(chainId) === 8453) return true;
 
-  const name = String(c?.chain?.name || c?.chain || c?.network || "").toLowerCase().trim();
+  const name = String(c?.chain?.name || c?.chain || c?.network || "")
+    .toLowerCase()
+    .trim();
   return name === "base";
 }
 
 function coinUrl(c: any) {
   const addr = c?.address ? String(c.address).toLowerCase() : "";
   const chainId = Number(c?.chainId ?? c?.chain?.id ?? c?.networkId ?? NaN);
-  const chainName = String(c?.chain?.name || c?.chain || c?.network || "").toLowerCase().trim();
+  const chainName = String(c?.chain?.name || c?.chain || c?.network || "")
+    .toLowerCase()
+    .trim();
 
   const isBase = chainId === 8453 || chainName === "base";
   const prefix = isBase ? "base:" : "";
 
-  return c?.zoraUrl || c?.url || (addr ? `https://zora.co/coin/${prefix}${addr}` : "https://zora.co");
+  return (
+    c?.zoraUrl ||
+    c?.url ||
+    (addr ? `https://zora.co/coin/${prefix}${addr}` : "https://zora.co")
+  );
 }
 
 function pickCoinIcon(c: any): string {
+  // ✅ Prefer the official Zora media preview image (returned strongly by getCoin/getCoins)
+  const mediaPreview =
+    c?.mediaContent?.previewImage?.medium ||
+    c?.mediaContent?.previewImage?.small ||
+    c?.mediaContent?.previewImage?.original ||
+    c?.mediaContent?.previewImage?.url;
+
+  if (typeof mediaPreview === "string" && mediaPreview.startsWith("http")) return mediaPreview;
+
   const candidates: any[] = [
     c?.icon,
     c?.iconUrl,
@@ -135,12 +151,7 @@ function identiconDataUri(seed: string) {
 }
 
 function creatorLabel(c: any) {
-  const handle =
-    c?.creator?.username ||
-    c?.creator?.handle ||
-    c?.creator?.ens ||
-    c?.creator?.name;
-
+  const handle = c?.creator?.username || c?.creator?.handle || c?.creator?.ens || c?.creator?.name;
   const addr = c?.creatorAddress || c?.creator?.address || c?.creator?.id;
 
   if (typeof handle === "string" && handle.trim()) return handle.trim();
@@ -153,13 +164,49 @@ export default async function ZoraNewPage() {
   let error = "";
 
   try {
+    // 1) fetch new coins list
     const response: any = await getCoinsNew({ count: 40 });
 
     const all =
       response?.data?.exploreList?.edges?.map((e: any) => e?.node).filter(Boolean) ?? [];
 
     const baseOnly = all.filter(isBaseCoin);
-    coins = baseOnly.length > 0 ? baseOnly : all;
+    const list = baseOnly.length > 0 ? baseOnly : all;
+
+    // 2) batch-fetch official coin details (icons via mediaContent.previewImage)
+    // getCoins expects { collectionAddress, chainId }[]  :contentReference[oaicite:1]{index=1}
+    const toFetch = list
+      .map((c: any) => {
+        const addr = String(c?.address || "").toLowerCase();
+        const chainId = Number(c?.chainId ?? c?.chain?.id ?? 8453);
+        if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) return null;
+        return { collectionAddress: addr, chainId: Number.isFinite(chainId) ? chainId : 8453 };
+      })
+      .filter(Boolean);
+
+    if (toFetch.length) {
+      try {
+        const details: any = await getCoins({ coins: toFetch as any[] });
+        const detailed = details?.data?.zora20Tokens ?? [];
+        const byAddr = new Map<string, any>(
+          detailed
+            .filter((x: any) => x?.address)
+            .map((x: any) => [String(x.address).toLowerCase(), x])
+        );
+
+        // Merge details into list (details wins)
+        coins = list.map((c: any) => {
+          const addr = String(c?.address || "").toLowerCase();
+          const d = byAddr.get(addr);
+          return d ? { ...c, ...d } : c;
+        });
+      } catch {
+        // If batch details fails, still show the list
+        coins = list;
+      }
+    } else {
+      coins = list;
+    }
   } catch (e: any) {
     error = e?.message || "Failed to load Zora new launches.";
   }
@@ -171,9 +218,7 @@ export default async function ZoraNewPage() {
         <div className="glass ring-soft rounded-2xl p-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
             <div className="text-2xl sm:text-3xl font-extrabold">🆕 Zora New Launches</div>
-            <div className="text-white/60 text-sm mt-1">
-              Newest coins created on Zora • Base preferred
-            </div>
+            <div className="text-white/60 text-sm mt-1">Newest coins created on Zora • Base preferred</div>
           </div>
 
           <div className="flex gap-2">
@@ -208,7 +253,7 @@ export default async function ZoraNewPage() {
           <div className="glass ring-soft rounded-2xl p-5 text-white/70">No new launches found.</div>
         )}
 
-        {/* ✅ LIST UI */}
+        {/* LIST UI */}
         <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
           {coins.map((c, i) => {
             const addr = String(c?.address || "").toLowerCase();
@@ -234,16 +279,14 @@ export default async function ZoraNewPage() {
                   <div className="text-sm text-white/60 truncate">{creatorLabel(c)}</div>
                 </div>
 
-                <div className="text-xs text-white/50 font-mono hidden sm:block">
-                  {shortAddr(c?.address)}
-                </div>
+                <div className="text-xs text-white/50 font-mono hidden sm:block">{shortAddr(c?.address)}</div>
               </a>
             );
           })}
         </div>
 
         <div className="text-xs text-white/50">
-          Avatar uses Zora image if available; if missing or hotlink fails, it falls back to a deterministic identicon.
+          <span className="font-mono">mediaContent.previewImage</span>;
         </div>
       </div>
     </main>

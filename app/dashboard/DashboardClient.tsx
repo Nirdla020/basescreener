@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Highlights from "../components/Highlights";
 import AdUnit from "../components/AdUnit";
 
 type DexPair = {
@@ -598,25 +597,6 @@ export default function DashboardClient() {
         </section>
       </div>
 
-      {/* Highlights */}
-      {tokenAddr.trim() === "" && rankedRows.length >= 5 && (
-        <div className="page-container mt-4">
-          <Highlights
-            tokens={rankedRows.map((r) => ({
-              symbol: r.baseToken?.symbol,
-              name: r.baseToken?.name,
-              address: r.baseToken?.address,
-              icon: r.info?.imageUrl,
-              change:
-                typeof r.priceChange?.h24 === "number"
-                  ? r.priceChange.h24
-                  : (r.txns?.h24?.buys ?? 0) - (r.txns?.h24?.sells ?? 0),
-              volume: r.volume?.h24 ?? 0,
-            }))}
-          />
-        </div>
-      )}
-
       {/* TOOLBAR */}
       <div className="page-container mt-4">
         <div className="glass ring-soft rounded-2xl p-4">
@@ -1057,4 +1037,4 @@ export default function DashboardClient() {
       )}
     </main>
   );
-}
+}    
