@@ -148,6 +148,8 @@ export default function Navbar() {
     if (pathname?.startsWith("/zora-new")) return "zora-new";
     if (pathname?.startsWith("/zora-trending")) return "zora-trending";
     if (pathname?.startsWith("/featured")) return "promote";
+    if (pathname?.startsWith("/portfolio-search")) return "portfolio-search"; // ✅ NEW
+    if (pathname?.startsWith("/portfolio/")) return "portfolio-search"; // ✅ highlight when viewing a portfolio
     return "home";
   }, [pathname]);
 
@@ -279,6 +281,11 @@ export default function Navbar() {
           <Link href="/featured" className={navBtn(active === "promote")}>
             🚀 Promote
           </Link>
+
+          {/* ✅ NEW: Portfolio Search button */}
+          <Link href="/portfolio-search" className={navBtn(active === "portfolio-search")}>
+            📁 Portfolio
+          </Link>
         </nav>
 
         {/* Mobile nav (dropdown grid) */}
@@ -337,13 +344,22 @@ export default function Navbar() {
                   🔥 Zora Trending
                 </Link>
 
-                {/* ✅ NEW: Promote button (full width on mobile grid) */}
+                {/* Promote */}
                 <Link
                   href="/featured"
                   className={`${navBtn(active === "promote")} text-center col-span-2`}
                   onClick={() => setMobileOpen(false)}
                 >
                   🚀 Promote
+                </Link>
+
+                {/* ✅ NEW: Portfolio Search button */}
+                <Link
+                  href="/portfolio-search"
+                  className={`${navBtn(active === "portfolio-search")} text-center col-span-2`}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  📁 Portfolio
                 </Link>
               </div>
             </div>
