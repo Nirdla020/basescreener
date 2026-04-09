@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { requireAdmin } from "@/lib/adminAuth";
 import { listPayments, getEarningsSummary } from "@/lib/featuredStore";
 
 export const runtime = "nodejs";
@@ -45,41 +47,61 @@ function fmtDate(ts?: string) {
 /* ---------- Page ---------- */
 
 export default async function RevenuePage() {
+  await requireAdmin(); // 🔒 protect admin earnings
+
   const summary = await getEarningsSummary(500);
   const payments = await listPayments(100);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-8">
-      <div className="text-2xl font-bold mb-4">💰 Earnings</div>
+      {/* Header + Admin nav */}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="text-2xl font-bold">💰 Earnings</div>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/featured"
+            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold hover:bg-white/10"
+          >
+            ⭐ Featured
+          </Link>
+
+          <Link
+            href="/admin/revenue"
+            className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold hover:bg-blue-500"
+          >
+            💰 Earnings
+          </Link>
+
+          <Link
+            href="/admin"
+            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold hover:bg-white/10"
+          >
+            Admin Home
+          </Link>
+        </div>
+      </div>
 
       {/* SUMMARY */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <div className="rounded-xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">Total USD</div>
-          <div className="text-lg font-bold">
-            {fmtUsd(summary.totalUsd)}
-          </div>
+          <div className="text-lg font-bold">{fmtUsd(summary.totalUsd)}</div>
         </div>
 
         <div className="rounded-xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">Total ETH</div>
-          <div className="text-lg font-bold">
-            {weiToEth6(summary.totalWei)} ETH
-          </div>
+          <div className="text-lg font-bold">{weiToEth6(summary.totalWei)} ETH</div>
         </div>
 
         <div className="rounded-xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">Payments</div>
-          <div className="text-lg font-bold">
-            {summary.count}
-          </div>
+          <div className="text-lg font-bold">{summary.count}</div>
         </div>
 
         <div className="rounded-xl bg-white/5 border border-white/10 p-4">
           <div className="text-xs text-white/60">Unique Payers</div>
-          <div className="text-lg font-bold">
-            {summary.uniquePayers}
-          </div>
+          <div className="text-lg font-bold">{summary.uniquePayers}</div>
         </div>
       </div>
 
@@ -108,9 +130,7 @@ export default async function RevenuePage() {
                 <td className="p-3">{shortAddr(p.payer)}</td>
                 <td className="p-3">{p.days}</td>
                 <td className="p-3">{fmtUsd(p.usd)}</td>
-                <td className="p-3">
-                  {weiToEth6(p.amountWei)} ETH
-                </td>
+                <td className="p-3">{weiToEth6(p.amountWei)} ETH</td>
                 <td className="p-3">
                   <a
                     href={`https://basescan.org/tx/${p.txHash}`}

@@ -69,8 +69,9 @@ export const metadata: Metadata = {
     images: ["/og.png"],
   },
   other: {
-    "google-adsense-account": "ca-pub-2273778994224812",
-  },
+  "google-adsense-account": "ca-pub-2273778994224812",
+  "base:app_id": "69d70456adb751d63e3ce65e",
+},
 };
 
 /* ✅ Structured Data */
@@ -137,6 +138,6 @@ export default function RootLayout({
 
         <Analytics />
       </body>
-    </html>
+    </html>   
   );
 }

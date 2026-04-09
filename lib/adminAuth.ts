@@ -1,19 +1,30 @@
+// lib/adminAuth.ts
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
-function norm(a: string) {
+function norm(a?: string) {
   return String(a || "").trim().toLowerCase();
 }
 
+/** Use in API routes: throws */
 export async function requireAdmin() {
-  const admin = process.env.ADMIN_WALLET ? norm(process.env.ADMIN_WALLET) : "";
-  if (!admin) return { ok: false as const, error: "Admin not configured" };
+  const admin = norm(process.env.ADMIN_WALLET);
+  if (!admin) throw new Error("ADMIN_NOT_CONFIGURED");
 
-  // ✅ cookies() is async in your setup
-  const cookieStore = await cookies();
-  const addr = norm(cookieStore.get("admin_addr")?.value || "");
+  const cookieStore = await cookies(); // ✅ IMPORTANT in your setup
+  const addr = norm(cookieStore.get("admin_addr")?.value);
 
-  if (!addr) return { ok: false as const, error: "Not logged in" };
-  if (addr !== admin) return { ok: false as const, error: "Not admin" };
+  if (!addr) throw new Error("NOT_LOGGED_IN");
+  if (addr !== admin) throw new Error("NOT_ADMIN");
 
-  return { ok: true as const, adminAddr: addr };
+  return addr;
+}
+
+/** Use in pages/server components: redirects */
+export async function requireAdminOrRedirect(redirectTo = "/") {
+  try {
+    return await requireAdmin();
+  } catch {
+    redirect(redirectTo);
+  }
 }
